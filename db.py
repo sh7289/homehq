@@ -31,6 +31,18 @@ def init_db(conn):
         conn.execute("ALTER TABLE pantry_items ADD COLUMN acquired_date TEXT")
     if "shelf_life_days" not in existing_columns:
         conn.execute("ALTER TABLE pantry_items ADD COLUMN shelf_life_days INTEGER")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS shopping_list_items (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            storage TEXT NOT NULL DEFAULT 'pantry',
+            quantity_to_buy REAL,
+            created_at TEXT
+        )
+        """
+    )
     conn.commit()
 
 
@@ -112,3 +124,30 @@ def update_item(
 def delete_item(conn, item_id):
     with conn:
         conn.execute("DELETE FROM pantry_items WHERE id = ?", (item_id,))
+
+
+def add_shopping_list_item(conn, name, storage="pantry", quantity_to_buy=None):
+    with conn:
+        cursor = conn.execute(
+            "INSERT INTO shopping_list_items (name, storage, quantity_to_buy, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (name, storage, quantity_to_buy, _now()),
+        )
+        return cursor.lastrowid
+
+
+def list_shopping_list_items(conn):
+    rows = conn.execute("SELECT * FROM shopping_list_items ORDER BY created_at").fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_shopping_list_item(conn, item_id):
+    row = conn.execute(
+        "SELECT * FROM shopping_list_items WHERE id = ?", (item_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def delete_shopping_list_item(conn, item_id):
+    with conn:
+        conn.execute("DELETE FROM shopping_list_items WHERE id = ?", (item_id,))

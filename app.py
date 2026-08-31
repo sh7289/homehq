@@ -25,6 +25,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import db
 import export_csv
 import expiry
+import matching
 from catalog_store import CatalogStore
 
 
@@ -211,6 +212,66 @@ def create_app():
             shelf_life_days=int(shelf_life_days) if shelf_life_days else None,
         )
         return _redirect_to_storage_page()
+
+    @app.route("/shopping-list")
+    @login_required
+    def shopping_list():
+        list_items = db.list_shopping_list_items(get_db())
+        suggestions = {}
+        for list_item in list_items:
+            candidates = db.list_items(get_db(), storage=list_item["storage"])
+            suggestions[list_item["id"]] = matching.find_best_match(
+                list_item["name"], candidates
+            )
+        return render_template(
+            "shopping_list.html",
+            list_items=list_items,
+            suggestions=suggestions,
+            active="shopping-list",
+        )
+
+    @app.route("/shopping-list/add", methods=["POST"])
+    @login_required
+    def shopping_list_add():
+        quantity_to_buy = request.form.get("quantity_to_buy", "").strip()
+        db.add_shopping_list_item(
+            get_db(),
+            name=request.form["name"].strip(),
+            storage=request.form.get("storage", "pantry"),
+            quantity_to_buy=float(quantity_to_buy) if quantity_to_buy else None,
+        )
+        return redirect(url_for("shopping_list"))
+
+    @app.route("/shopping-list/<int:item_id>/delete", methods=["POST"])
+    @login_required
+    def shopping_list_delete(item_id):
+        db.delete_shopping_list_item(get_db(), item_id)
+        return redirect(url_for("shopping_list"))
+
+    @app.route("/shopping-list/<int:item_id>/resolve", methods=["POST"])
+    @login_required
+    def shopping_list_resolve(item_id):
+        list_item = db.get_shopping_list_item(get_db(), item_id)
+        if list_item is None:
+            abort(404)
+        quantity = float(request.form.get("quantity") or 0)
+        action = request.form.get("action")
+
+        if action == "match":
+            matched_item_id = int(request.form["matched_item_id"])
+            db.adjust_quantity(get_db(), matched_item_id, delta=quantity)
+        else:
+            db.add_item(
+                get_db(),
+                name=list_item["name"],
+                quantity=quantity,
+                unit="",
+                location="",
+                storage=list_item["storage"],
+            )
+
+        db.delete_shopping_list_item(get_db(), item_id)
+        return redirect(url_for("shopping_list"))
 
     @app.route("/catalog/<category>")
     @login_required

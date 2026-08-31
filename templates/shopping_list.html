@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Shopping List – Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="top-actions">
+      <h1 class="card__title">Shopping List</h1>
+      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
+    </div>
+    <hr class="card__rule">
+    <p class="card__meta">{{ list_items|length }} item{{ '' if list_items|length == 1 else 's' }} to buy</p>
+
+    <ul class="rows">
+      {% for item in list_items %}
+        {% set suggestion = suggestions.get(item.id) %}
+        <li class="row-item">
+          <div class="row">
+            <span class="row__name">{{ item.name }}</span>
+            <span class="row__meta">
+              {{ item.storage|titlecase }}{% if item.quantity_to_buy %} &middot; need {{ item.quantity_to_buy }}{% endif %}
+            </span>
+            <span class="row__actions">
+              <button class="btn btn--sm js-edit-toggle" type="button" data-target="checkoff-{{ item.id }}">Check off</button>
+              <form class="inline-form" method="post" action="{{ url_for('shopping_list_delete', item_id=item.id) }}">
+                <button class="btn btn--sm btn--ghost" type="submit">Remove</button>
+              </form>
+            </span>
+          </div>
+          <div class="edit-panel" id="checkoff-{{ item.id }}" hidden>
+            {% if suggestion %}
+              <p class="eyebrow">Looks like a match</p>
+              <form method="post" action="{{ url_for('shopping_list_resolve', item_id=item.id) }}">
+                <input type="hidden" name="action" value="match">
+                <input type="hidden" name="matched_item_id" value="{{ suggestion.id }}">
+                <div class="form-row">
+                  <div class="field">
+                    <label for="qty-match-{{ item.id }}">Quantity bought</label>
+                    <input id="qty-match-{{ item.id }}" type="number" step="any" name="quantity" value="{{ item.quantity_to_buy or 1 }}" required>
+                  </div>
+                </div>
+                <div class="edit-panel__actions">
+                  <button class="btn btn--primary btn--sm" type="submit">Confirm match &rarr; add to &ldquo;{{ suggestion.name }}&rdquo;</button>
+                  <button class="btn btn--ghost btn--sm js-edit-toggle" type="button" data-target="checkoff-{{ item.id }}">Cancel</button>
+                </div>
+              </form>
+              <p class="eyebrow" style="margin-top:0.8rem">Not a match?</p>
+            {% else %}
+              <p class="eyebrow">No close match found in {{ item.storage }}</p>
+            {% endif %}
+            <form method="post" action="{{ url_for('shopping_list_resolve', item_id=item.id) }}">
+              <input type="hidden" name="action" value="new">
+              <div class="form-row">
+                <div class="field">
+                  <label for="qty-new-{{ item.id }}">Quantity bought</label>
+                  <input id="qty-new-{{ item.id }}" type="number" step="any" name="quantity" value="{{ item.quantity_to_buy or 1 }}" required>
+                </div>
+              </div>
+              <div class="edit-panel__actions">
+                <button class="btn btn--sm" type="submit">Add as new {{ item.storage }} item</button>
+                {% if not suggestion %}
+                  <button class="btn btn--ghost btn--sm js-edit-toggle" type="button" data-target="checkoff-{{ item.id }}">Cancel</button>
+                {% endif %}
+              </div>
+            </form>
+          </div>
+        </li>
+      {% else %}
+        <li class="row">Nothing on the list yet — add something below.</li>
+      {% endfor %}
+    </ul>
+
+    <span class="eyebrow">Add item</span>
+    <form method="post" action="{{ url_for('shopping_list_add') }}">
+      <div class="form-row">
+        <div class="field">
+          <label for="name">Name</label>
+          <input id="name" type="text" name="name" required>
+        </div>
+        <div class="field">
+          <label for="storage">Storage</label>
+          <select id="storage" name="storage">
+            <option value="pantry">Pantry</option>
+            <option value="freezer">Freezer</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="quantity_to_buy">Quantity needed (optional)</label>
+          <input id="quantity_to_buy" type="number" step="any" name="quantity_to_buy">
+        </div>
+      </div>
+      <button class="btn btn--primary" type="submit">Add to list</button>
+    </form>
+  </div>
+{% endblock %}
