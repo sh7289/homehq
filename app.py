@@ -20,6 +20,7 @@ from flask_login import (
     login_user,
     logout_user,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import db
 import export_csv
@@ -51,6 +52,14 @@ def create_app():
     app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+    behind_tls_proxy = os.environ.get("HOMEHQ_BEHIND_TLS_PROXY", "").lower() == "true"
+    app.config["SESSION_COOKIE_SECURE"] = behind_tls_proxy
+    if behind_tls_proxy:
+        # nginx terminates TLS and forwards plain HTTP; trust its headers so
+        # request.is_secure (and therefore secure cookies) work correctly,
+        # and url_for(_external=True) generates https:// links.
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     users = _load_users()
 
