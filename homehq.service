@@ -8,7 +8,7 @@ User=homehq
 Group=homehq
 WorkingDirectory=/home/homehq/homehq
 EnvironmentFile=/home/homehq/.homehq.env
-ExecStart=/home/homehq/homehq/.venv/bin/gunicorn --workers 1 --threads 4 --bind 0.0.0.0:8502 "app:create_app()"
+ExecStart=/home/homehq/homehq/.venv/bin/gunicorn --workers 1 --threads 4 --bind 127.0.0.1:8502 "app:create_app()"
 Restart=always
 RestartSec=5s
 
