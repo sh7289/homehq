@@ -42,6 +42,7 @@ def test_add_catalog_staging_item_with_catalog_fields(conn):
         category="valuables",
         brand="Columbia Records",
         notes="Miles Davis, 1959 pressing",
+        estimated_value="$150-250",
         source_image_path="uploads/record1.jpg",
     )
 
@@ -49,6 +50,7 @@ def test_add_catalog_staging_item_with_catalog_fields(conn):
     assert item["category"] == "valuables"
     assert item["brand"] == "Columbia Records"
     assert item["notes"] == "Miles Davis, 1959 pressing"
+    assert item["estimated_value"] == "$150-250"
 
 
 def test_update_staging_item_edits_fields(conn):

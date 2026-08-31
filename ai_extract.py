@@ -24,11 +24,18 @@ Receipt:
 
 Single item:
 {"kind": "catalog_item", "name": "...", "category": "kitchen", "brand": null,
- "model": null, "serial_number": null, "notes": "..."}
+ "model": null, "serial_number": null, "notes": "...", "estimated_value": null}
 - "category" must be one of: kitchen, tools, manuals, valuables.
 - Fill in whatever fields you can confidently read; use null for the rest.
 - "notes" is free text: anything else useful you can see (condition,
   distinguishing marks, edition, etc).
+- "estimated_value" is a ROUGH ballpark of current resale/replacement value
+  in USD, based only on your general knowledge of this kind of item (e.g.
+  "$150-250" or "$40") -- NOT a real appraisal or live market lookup. Only
+  provide one for recognizable, valuable-ish items (electronics, tools,
+  collectibles); use null for everyday items or anything you're not
+  reasonably confident about (a manual, a generic kitchen tool, an item
+  you can't identify well enough to guess).
 """
 
 
@@ -89,6 +96,7 @@ def parse_extraction_response(response_text):
                 "model": data.get("model"),
                 "serial_number": data.get("serial_number"),
                 "notes": data.get("notes"),
+                "estimated_value": data.get("estimated_value"),
             }
         ]
 

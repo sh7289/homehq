@@ -48,6 +48,7 @@ def test_parses_catalog_item_response():
             "model": None,
             "serial_number": None,
             "notes": "Miles Davis, 1959 pressing",
+            "estimated_value": "$150-250",
         }
     )
 
@@ -62,8 +63,19 @@ def test_parses_catalog_item_response():
             "model": None,
             "serial_number": None,
             "notes": "Miles Davis, 1959 pressing",
+            "estimated_value": "$150-250",
         }
     ]
+
+
+def test_parses_catalog_item_response_with_no_value_estimate():
+    from ai_extract import parse_extraction_response
+
+    response = json.dumps({"kind": "catalog_item", "name": "Dishwasher Manual"})
+
+    rows = parse_extraction_response(response)
+
+    assert rows[0]["estimated_value"] is None
 
 
 def test_strips_markdown_code_fence_around_json():

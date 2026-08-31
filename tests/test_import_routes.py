@@ -185,6 +185,54 @@ def test_approve_catalog_item_writes_markdown_file(client, monkeypatch):
     assert _staging_items() == []
 
 
+def test_approve_catalog_item_with_estimate_writes_value_and_date(client, monkeypatch):
+    import datetime
+
+    import db
+
+    monkeypatch.delenv("HOMEHQ_GITHUB_TOKEN", raising=False)
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    item_id = db.add_staging_item(
+        conn,
+        target_type="catalog",
+        name="Turntable",
+        category="valuables",
+        estimated_value="$800-1200",
+    )
+    conn.close()
+
+    client.post(f"/import/{item_id}/approve", data={})
+
+    content_dir = os.environ["HOMEHQ_CONTENT_DIR"]
+    md_path = os.path.join(content_dir, "valuables", "turntable.md")
+    text = open(md_path).read()
+    assert "estimated_value: $800-1200" in text
+    today = datetime.date.today().isoformat()
+    assert f"estimated_value_date: {today}" in text
+
+
+def test_approve_catalog_item_without_estimate_omits_value_fields(client, monkeypatch):
+    import db
+
+    monkeypatch.delenv("HOMEHQ_GITHUB_TOKEN", raising=False)
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    item_id = db.add_staging_item(
+        conn, target_type="catalog", name="Dishwasher Manual", category="manuals"
+    )
+    conn.close()
+
+    client.post(f"/import/{item_id}/approve", data={})
+
+    content_dir = os.environ["HOMEHQ_CONTENT_DIR"]
+    md_path = os.path.join(content_dir, "manuals", "dishwasher-manual.md")
+    text = open(md_path).read()
+    assert "estimated_value" not in text
+
+
 def test_reject_deletes_staging_item(client):
     import db
 

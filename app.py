@@ -1,5 +1,6 @@
 import os
 import uuid
+from datetime import date
 
 import bcrypt
 from flask import (
@@ -358,6 +359,9 @@ def create_app():
                 for key in ("brand", "model", "serial_number")
                 if staging_item.get(key)
             }
+            if staging_item.get("estimated_value"):
+                frontmatter["estimated_value"] = staging_item["estimated_value"]
+                frontmatter["estimated_value_date"] = date.today()
             catalog_writer.write_catalog_item(
                 content_dir,
                 photos_dir,

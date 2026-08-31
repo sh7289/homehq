@@ -59,12 +59,18 @@ def init_db(conn):
             model TEXT,
             serial_number TEXT,
             notes TEXT,
+            estimated_value TEXT,
             source_image_path TEXT,
             status TEXT NOT NULL DEFAULT 'pending',
             created_at TEXT
         )
         """
     )
+    staging_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(import_staging_items)")
+    }
+    if "estimated_value" not in staging_columns:
+        conn.execute("ALTER TABLE import_staging_items ADD COLUMN estimated_value TEXT")
     conn.commit()
 
 
@@ -187,6 +193,7 @@ _STAGING_FIELDS = (
     "model",
     "serial_number",
     "notes",
+    "estimated_value",
     "source_image_path",
 )
 

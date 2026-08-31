@@ -69,6 +69,7 @@
                 {% if item.model %}<dt>Model</dt><dd>{{ item.model }}</dd>{% endif %}
                 {% if item.serial_number %}<dt>Serial</dt><dd>{{ item.serial_number }}</dd>{% endif %}
                 {% if item.notes %}<dt>Notes</dt><dd>{{ item.notes }}</dd>{% endif %}
+                {% if item.estimated_value %}<dt>Est. value</dt><dd>{{ item.estimated_value }} <span class="row__meta">(AI estimate, not an appraisal)</span></dd>{% endif %}
               </dl>
               <form method="post" action="{{ url_for('import_approve', item_id=item.id) }}">
                 <div class="edit-panel__actions">
