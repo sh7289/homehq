@@ -159,6 +159,34 @@ def test_approve_inventory_item_as_match_increments_existing(client):
     assert _staging_items() == []
 
 
+def test_approve_inventory_item_uses_edited_name_and_unit(client):
+    import db
+
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    item_id = db.add_staging_item(
+        conn, target_type="inventory", name="Cvmmin", quantity=1, unit="jr", storage="pantry"
+    )
+    conn.close()
+
+    response = client.post(
+        f"/import/{item_id}/approve",
+        data={
+            "action": "new",
+            "name": "Cumin",
+            "quantity": "1",
+            "unit": "jar",
+            "storage": "pantry",
+        },
+    )
+
+    assert response.status_code == 302
+    items = _db_items(storage="pantry")
+    assert items[0]["name"] == "Cumin"
+    assert items[0]["unit"] == "jar"
+
+
 def test_approve_catalog_item_writes_markdown_file(client, monkeypatch):
     import db
 
@@ -183,6 +211,41 @@ def test_approve_catalog_item_writes_markdown_file(client, monkeypatch):
     md_path = os.path.join(content_dir, "valuables", "kind-of-blue.md")
     assert os.path.exists(md_path)
     assert _staging_items() == []
+
+
+def test_approve_catalog_item_uses_edited_fields(client, monkeypatch):
+    import db
+
+    monkeypatch.delenv("HOMEHQ_GITHUB_TOKEN", raising=False)
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    item_id = db.add_staging_item(
+        conn, target_type="catalog", name="Kind of Blu", category="valuables", brand="Columbi"
+    )
+    conn.close()
+
+    response = client.post(
+        f"/import/{item_id}/approve",
+        data={
+            "name": "Kind of Blue",
+            "category": "vinyl-records",
+            "brand": "Columbia Records",
+            "model": "",
+            "serial_number": "",
+            "notes": "Miles Davis, 1959 pressing",
+            "estimated_value": "$40",
+        },
+    )
+
+    assert response.status_code == 302
+    content_dir = os.environ["HOMEHQ_CONTENT_DIR"]
+    md_path = os.path.join(content_dir, "vinyl-records", "kind-of-blue.md")
+    assert os.path.exists(md_path)
+    text = open(md_path).read()
+    assert "brand: Columbia Records" in text
+    assert "estimated_value: $40" in text
+    assert "Miles Davis, 1959 pressing" in text
 
 
 def test_approve_catalog_item_with_estimate_writes_value_and_date(client, monkeypatch):

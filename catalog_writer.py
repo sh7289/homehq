@@ -58,6 +58,38 @@ def write_catalog_item(
     return markdown_path, photo_rel_path
 
 
+def _read_frontmatter_and_body(md_path):
+    text = open(md_path, encoding="utf-8").read()
+    _, raw_frontmatter, body = text.split("---", 2)
+    frontmatter = yaml.safe_load(raw_frontmatter) or {}
+    return frontmatter, body.strip()
+
+
+def add_photo_to_item(content_dir, photos_dir, category, slug, source_image_path):
+    """Append a photo to an already-written catalog item. Returns the new
+    photo's path relative to photos_dir."""
+    md_path = os.path.join(content_dir, category, f"{slug}.md")
+    frontmatter, body = _read_frontmatter_and_body(md_path)
+
+    existing_photos = list(frontmatter.get("photos") or [])
+    ext = os.path.splitext(source_image_path)[1] or ".jpg"
+    photo_category_dir = os.path.join(photos_dir, category)
+    photo_slug = _unique_path(photo_category_dir, f"{slug}-{len(existing_photos) + 1}", ext)
+    photo_rel_path = f"{category}/{photo_slug}{ext}"
+    shutil.copyfile(source_image_path, os.path.join(photos_dir, photo_rel_path))
+
+    frontmatter["photos"] = existing_photos + [photo_rel_path]
+
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write("---\n")
+        yaml.safe_dump(frontmatter, f, sort_keys=False)
+        f.write("---\n")
+        f.write(body)
+        f.write("\n")
+
+    return photo_rel_path
+
+
 def _make_askpass_script(token):
     fd, path = tempfile.mkstemp(prefix="homehq-askpass-")
     with os.fdopen(fd, "w") as f:

@@ -294,7 +294,11 @@ def create_app():
                     staging_item["name"], candidates
                 )
         return render_template(
-            "import_review.html", items=pending, suggestions=suggestions, active="import"
+            "import_review.html",
+            items=pending,
+            suggestions=suggestions,
+            categories=app.catalog.categories(),
+            active="import",
         )
 
     @app.route("/import/upload", methods=["GET", "POST"])
@@ -339,43 +343,46 @@ def create_app():
         if staging_item is None:
             abort(404)
 
+        def field(name):
+            return request.form.get(name) or staging_item.get(name)
+
         if staging_item["target_type"] == "inventory":
             quantity = float(request.form.get("quantity") or 0)
+            name = field("name")
             if request.form.get("action") == "match":
                 matched_item_id = int(request.form["matched_item_id"])
                 db.adjust_quantity(get_db(), matched_item_id, delta=quantity)
             else:
                 db.add_item(
                     get_db(),
-                    name=staging_item["name"],
+                    name=name,
                     quantity=quantity,
-                    unit=staging_item.get("unit") or "",
+                    unit=field("unit") or "",
                     location="",
-                    storage=staging_item.get("storage") or "pantry",
+                    storage=field("storage") or "pantry",
                 )
         else:
             frontmatter = {
-                key: staging_item.get(key)
-                for key in ("brand", "model", "serial_number")
-                if staging_item.get(key)
+                key: field(key) for key in ("brand", "model", "serial_number") if field(key)
             }
-            if staging_item.get("estimated_value"):
-                frontmatter["estimated_value"] = staging_item["estimated_value"]
+            estimated_value = field("estimated_value")
+            if estimated_value:
+                frontmatter["estimated_value"] = estimated_value
                 frontmatter["estimated_value_date"] = date.today()
             catalog_writer.write_catalog_item(
                 content_dir,
                 photos_dir,
-                category=staging_item.get("category") or "kitchen",
-                name=staging_item["name"],
+                category=field("category") or "kitchen",
+                name=field("name"),
                 frontmatter=frontmatter,
-                body=staging_item.get("notes") or "",
+                body=field("notes") or "",
                 source_image_path=staging_item.get("source_image_path"),
             )
             app.catalog.reload()
             github_token = os.environ.get("HOMEHQ_GITHUB_TOKEN")
             if github_token:
                 catalog_writer.git_commit_and_push(
-                    repo_dir, f"Add catalog item: {staging_item['name']}", github_token
+                    repo_dir, f"Add catalog item: {field('name')}", github_token
                 )
 
         db.delete_staging_item(get_db(), item_id)
@@ -404,6 +411,32 @@ def create_app():
         if item is None:
             abort(404)
         return render_template("catalog_detail.html", item=item, active=category)
+
+    @app.route("/catalog/<category>/<slug>/add-photo", methods=["POST"])
+    @login_required
+    def catalog_add_photo(category, slug):
+        item = app.catalog.get(category, slug)
+        if item is None:
+            abort(404)
+
+        photo = request.files.get("photo")
+        if not photo or not photo.filename:
+            return redirect(url_for("catalog_detail", category=category, slug=slug))
+
+        ext = os.path.splitext(photo.filename)[1] or ".jpg"
+        upload_path = os.path.join(uploads_dir, f"{uuid.uuid4().hex}{ext}")
+        photo.save(upload_path)
+
+        catalog_writer.add_photo_to_item(content_dir, photos_dir, category, slug, upload_path)
+        app.catalog.reload()
+
+        github_token = os.environ.get("HOMEHQ_GITHUB_TOKEN")
+        if github_token:
+            catalog_writer.git_commit_and_push(
+                repo_dir, f"Add photo to catalog item: {item.name}", github_token
+            )
+
+        return redirect(url_for("catalog_detail", category=category, slug=slug))
 
     @app.route("/photos/<path:filename>")
     @login_required

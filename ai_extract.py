@@ -5,7 +5,17 @@ import anthropic
 
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
-_VALID_CATEGORIES = ("kitchen", "tools", "manuals", "valuables")
+_VALID_CATEGORIES = (
+    "kitchen",
+    "tools",
+    "manuals",
+    "musical-instruments",
+    "vinyl-equipment",
+    "vinyl-records",
+    "jewelry",
+    "electronics",
+    "valuables",
+)
 
 _PROMPT = """You are looking at a photo that is either (a) a store receipt, or
 (b) a single physical household item (a tool, kitchen item, appliance manual,
@@ -25,7 +35,16 @@ Receipt:
 Single item:
 {"kind": "catalog_item", "name": "...", "category": "kitchen", "brand": null,
  "model": null, "serial_number": null, "notes": "...", "estimated_value": null}
-- "category" must be one of: kitchen, tools, manuals, valuables.
+- "category" must be exactly one of:
+  kitchen (cookware, utensils, kitchen appliances)
+  tools (hand/power tools, hardware, garage/workshop items)
+  manuals (appliance/product manuals and documentation)
+  musical-instruments (instruments, and gear like pedals, amps, cables used to play them)
+  vinyl-equipment (turntables, phono preamps, speakers/receivers for playing records)
+  vinyl-records (the records themselves)
+  electronics (laptops, tablets, phones, and other general electronics not covered above)
+  jewelry
+  valuables (anything else worth insurance-documenting that doesn't fit the above)
 - Fill in whatever fields you can confidently read; use null for the rest.
 - "notes" is free text: anything else useful you can see (condition,
   distinguishing marks, edition, etc).

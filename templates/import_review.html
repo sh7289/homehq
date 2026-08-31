@@ -46,7 +46,7 @@
                     <button class="btn btn--primary btn--sm" type="submit">Confirm match &rarr; add to &ldquo;{{ suggestion.name }}&rdquo;</button>
                   </div>
                 </form>
-                <p class="eyebrow" style="margin-top:0.8rem">Not a match?</p>
+                <p class="eyebrow" style="margin-top:0.8rem">Not a match? Edit and add as a new item:</p>
               {% else %}
                 <p class="eyebrow">No close match found in {{ item.storage or 'pantry' }}</p>
               {% endif %}
@@ -54,24 +54,67 @@
                 <input type="hidden" name="action" value="new">
                 <div class="form-row">
                   <div class="field">
+                    <label for="name-{{ item.id }}">Name</label>
+                    <input id="name-{{ item.id }}" type="text" name="name" value="{{ item.name }}" required>
+                  </div>
+                  <div class="field">
                     <label for="qty-new-{{ item.id }}">Quantity</label>
                     <input id="qty-new-{{ item.id }}" type="number" step="any" name="quantity" value="{{ item.quantity or 1 }}" required>
                   </div>
+                  <div class="field">
+                    <label for="unit-{{ item.id }}">Unit</label>
+                    <input id="unit-{{ item.id }}" type="text" name="unit" value="{{ item.unit or '' }}">
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="storage-{{ item.id }}">Storage</label>
+                  <select id="storage-{{ item.id }}" name="storage">
+                    <option value="pantry" {{ 'selected' if (item.storage or 'pantry') == 'pantry' }}>Pantry</option>
+                    <option value="freezer" {{ 'selected' if item.storage == 'freezer' }}>Freezer</option>
+                  </select>
                 </div>
                 <div class="edit-panel__actions">
-                  <button class="btn btn--sm" type="submit">Add as new {{ item.storage or 'pantry' }} item</button>
+                  <button class="btn btn--sm" type="submit">Add as new item</button>
                 </div>
               </form>
             {% else %}
-              <dl class="spec-list">
-                <dt>Category</dt><dd>{{ item.category or 'kitchen' }}</dd>
-                {% if item.brand %}<dt>Brand</dt><dd>{{ item.brand }}</dd>{% endif %}
-                {% if item.model %}<dt>Model</dt><dd>{{ item.model }}</dd>{% endif %}
-                {% if item.serial_number %}<dt>Serial</dt><dd>{{ item.serial_number }}</dd>{% endif %}
-                {% if item.notes %}<dt>Notes</dt><dd>{{ item.notes }}</dd>{% endif %}
-                {% if item.estimated_value %}<dt>Est. value</dt><dd>{{ item.estimated_value }} <span class="row__meta">(AI estimate, not an appraisal)</span></dd>{% endif %}
-              </dl>
               <form method="post" action="{{ url_for('import_approve', item_id=item.id) }}">
+                <div class="form-row">
+                  <div class="field">
+                    <label for="name-{{ item.id }}">Name</label>
+                    <input id="name-{{ item.id }}" type="text" name="name" value="{{ item.name }}" required>
+                  </div>
+                  <div class="field">
+                    <label for="category-{{ item.id }}">Category</label>
+                    <select id="category-{{ item.id }}" name="category">
+                      {% for category in categories %}
+                        <option value="{{ category }}" {{ 'selected' if (item.category or 'kitchen') == category }}>{{ category|titlecase }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="field">
+                    <label for="brand-{{ item.id }}">Brand</label>
+                    <input id="brand-{{ item.id }}" type="text" name="brand" value="{{ item.brand or '' }}">
+                  </div>
+                  <div class="field">
+                    <label for="model-{{ item.id }}">Model</label>
+                    <input id="model-{{ item.id }}" type="text" name="model" value="{{ item.model or '' }}">
+                  </div>
+                  <div class="field">
+                    <label for="serial-{{ item.id }}">Serial number</label>
+                    <input id="serial-{{ item.id }}" type="text" name="serial_number" value="{{ item.serial_number or '' }}">
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="notes-{{ item.id }}">Notes</label>
+                  <input id="notes-{{ item.id }}" type="text" name="notes" value="{{ item.notes or '' }}">
+                </div>
+                <div class="field">
+                  <label for="value-{{ item.id }}">Estimated value <span class="row__meta">(AI ballpark, not an appraisal -- clear it if you don't trust it)</span></label>
+                  <input id="value-{{ item.id }}" type="text" name="estimated_value" value="{{ item.estimated_value or '' }}">
+                </div>
                 <div class="edit-panel__actions">
                   <button class="btn btn--primary btn--sm" type="submit">Approve &amp; add to catalog</button>
                 </div>

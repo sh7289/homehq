@@ -19,5 +19,13 @@
     {% endfor %}
 
     {% if item.body %}<div class="notes">{{ item.body }}</div>{% endif %}
+
+    <form method="post" action="{{ url_for('catalog_add_photo', category=item.category, slug=item.slug) }}" enctype="multipart/form-data" style="margin-top:1.2rem">
+      <div class="field">
+        <label for="photo">Add a photo</label>
+        <input id="photo" type="file" name="photo" accept="image/*" required>
+      </div>
+      <button class="btn btn--sm" type="submit">Upload</button>
+    </form>
   </div>
 {% endblock %}
