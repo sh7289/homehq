@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Review Imports – Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="top-actions">
+      <h1 class="card__title">Review Imports</h1>
+      <a class="btn btn--sm" href="{{ url_for('import_upload') }}">Upload photo</a>
+    </div>
+    <hr class="card__rule">
+    <p class="card__meta">{{ items|length }} item{{ '' if items|length == 1 else 's' }} awaiting review</p>
+
+    <ul class="rows">
+      {% for item in items %}
+        {% set suggestion = suggestions.get(item.id) %}
+        <li class="row-item">
+          <div class="row">
+            <span class="row__name">{{ item.name }}</span>
+            <span class="row__meta">
+              {% if item.target_type == 'inventory' %}
+                &rarr; {{ (item.storage or 'pantry')|titlecase }}{% if item.quantity %} &middot; {{ item.quantity }} {{ item.unit or '' }}{% endif %}
+              {% else %}
+                &rarr; Catalog / {{ (item.category or 'kitchen')|titlecase }}{% if item.brand %} &middot; {{ item.brand }}{% endif %}
+              {% endif %}
+            </span>
+            <span class="row__actions">
+              <button class="btn btn--sm js-edit-toggle" type="button" data-target="review-{{ item.id }}">Review</button>
+              <form class="inline-form" method="post" action="{{ url_for('import_reject', item_id=item.id) }}">
+                <button class="btn btn--sm btn--ghost" type="submit">Discard</button>
+              </form>
+            </span>
+          </div>
+          <div class="edit-panel" id="review-{{ item.id }}" hidden>
+            {% if item.target_type == 'inventory' %}
+              {% if suggestion %}
+                <p class="eyebrow">Looks like a match</p>
+                <form method="post" action="{{ url_for('import_approve', item_id=item.id) }}">
+                  <input type="hidden" name="action" value="match">
+                  <input type="hidden" name="matched_item_id" value="{{ suggestion.id }}">
+                  <div class="form-row">
+                    <div class="field">
+                      <label for="qty-match-{{ item.id }}">Quantity</label>
+                      <input id="qty-match-{{ item.id }}" type="number" step="any" name="quantity" value="{{ item.quantity or 1 }}" required>
+                    </div>
+                  </div>
+                  <div class="edit-panel__actions">
+                    <button class="btn btn--primary btn--sm" type="submit">Confirm match &rarr; add to &ldquo;{{ suggestion.name }}&rdquo;</button>
+                  </div>
+                </form>
+                <p class="eyebrow" style="margin-top:0.8rem">Not a match?</p>
+              {% else %}
+                <p class="eyebrow">No close match found in {{ item.storage or 'pantry' }}</p>
+              {% endif %}
+              <form method="post" action="{{ url_for('import_approve', item_id=item.id) }}">
+                <input type="hidden" name="action" value="new">
+                <div class="form-row">
+                  <div class="field">
+                    <label for="qty-new-{{ item.id }}">Quantity</label>
+                    <input id="qty-new-{{ item.id }}" type="number" step="any" name="quantity" value="{{ item.quantity or 1 }}" required>
+                  </div>
+                </div>
+                <div class="edit-panel__actions">
+                  <button class="btn btn--sm" type="submit">Add as new {{ item.storage or 'pantry' }} item</button>
+                </div>
+              </form>
+            {% else %}
+              <dl class="spec-list">
+                <dt>Category</dt><dd>{{ item.category or 'kitchen' }}</dd>
+                {% if item.brand %}<dt>Brand</dt><dd>{{ item.brand }}</dd>{% endif %}
+                {% if item.model %}<dt>Model</dt><dd>{{ item.model }}</dd>{% endif %}
+                {% if item.serial_number %}<dt>Serial</dt><dd>{{ item.serial_number }}</dd>{% endif %}
+                {% if item.notes %}<dt>Notes</dt><dd>{{ item.notes }}</dd>{% endif %}
+              </dl>
+              <form method="post" action="{{ url_for('import_approve', item_id=item.id) }}">
+                <div class="edit-panel__actions">
+                  <button class="btn btn--primary btn--sm" type="submit">Approve &amp; add to catalog</button>
+                </div>
+              </form>
+            {% endif %}
+          </div>
+        </li>
+      {% else %}
+        <li class="row">Nothing waiting on review. <a href="{{ url_for('import_upload') }}">Upload a photo</a> to get started.</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endblock %}

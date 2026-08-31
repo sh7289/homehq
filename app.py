@@ -1,4 +1,5 @@
 import os
+import uuid
 
 import bcrypt
 from flask import (
@@ -22,6 +23,8 @@ from flask_login import (
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+import ai_extract
+import catalog_writer
 import db
 import export_csv
 import expiry
@@ -67,6 +70,9 @@ def create_app():
     content_dir = os.environ["HOMEHQ_CONTENT_DIR"]
     photos_dir = os.environ["HOMEHQ_PHOTOS_DIR"]
     db_path = os.environ["HOMEHQ_DB_PATH"]
+    uploads_dir = os.environ["HOMEHQ_UPLOADS_DIR"]
+    os.makedirs(uploads_dir, exist_ok=True)
+    repo_dir = os.path.dirname(os.path.normpath(content_dir))
     app.catalog = CatalogStore(content_dir)
     app.catalog.reload()
 
@@ -272,6 +278,110 @@ def create_app():
 
         db.delete_shopping_list_item(get_db(), item_id)
         return redirect(url_for("shopping_list"))
+
+    @app.route("/import")
+    @login_required
+    def import_review():
+        pending = db.list_staging_items(get_db(), status="pending")
+        suggestions = {}
+        for staging_item in pending:
+            if staging_item["target_type"] == "inventory":
+                candidates = db.list_items(
+                    get_db(), storage=staging_item.get("storage") or "pantry"
+                )
+                suggestions[staging_item["id"]] = matching.find_best_match(
+                    staging_item["name"], candidates
+                )
+        return render_template(
+            "import_review.html", items=pending, suggestions=suggestions, active="import"
+        )
+
+    @app.route("/import/upload", methods=["GET", "POST"])
+    @login_required
+    def import_upload():
+        if request.method == "POST":
+            photo = request.files.get("photo")
+            if not photo or not photo.filename:
+                return render_template("import_upload.html", error="Choose a photo first.")
+
+            ext = os.path.splitext(photo.filename)[1] or ".jpg"
+            upload_path = os.path.join(uploads_dir, f"{uuid.uuid4().hex}{ext}")
+            photo.save(upload_path)
+            media_type = photo.mimetype or "image/jpeg"
+
+            try:
+                api_key = os.environ["HOMEHQ_ANTHROPIC_API_KEY"]
+            except KeyError:
+                return render_template(
+                    "import_upload.html",
+                    error="AI import isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY.",
+                )
+
+            try:
+                with open(upload_path, "rb") as f:
+                    rows = ai_extract.extract_from_image(
+                        f.read(), media_type, api_key=api_key
+                    )
+            except ai_extract.ExtractionError as exc:
+                return render_template("import_upload.html", error=str(exc))
+
+            for row in rows:
+                db.add_staging_item(get_db(), source_image_path=upload_path, **row)
+            return redirect(url_for("import_review"))
+
+        return render_template("import_upload.html", error=None)
+
+    @app.route("/import/<int:item_id>/approve", methods=["POST"])
+    @login_required
+    def import_approve(item_id):
+        staging_item = db.get_staging_item(get_db(), item_id)
+        if staging_item is None:
+            abort(404)
+
+        if staging_item["target_type"] == "inventory":
+            quantity = float(request.form.get("quantity") or 0)
+            if request.form.get("action") == "match":
+                matched_item_id = int(request.form["matched_item_id"])
+                db.adjust_quantity(get_db(), matched_item_id, delta=quantity)
+            else:
+                db.add_item(
+                    get_db(),
+                    name=staging_item["name"],
+                    quantity=quantity,
+                    unit=staging_item.get("unit") or "",
+                    location="",
+                    storage=staging_item.get("storage") or "pantry",
+                )
+        else:
+            frontmatter = {
+                key: staging_item.get(key)
+                for key in ("brand", "model", "serial_number")
+                if staging_item.get(key)
+            }
+            catalog_writer.write_catalog_item(
+                content_dir,
+                photos_dir,
+                category=staging_item.get("category") or "kitchen",
+                name=staging_item["name"],
+                frontmatter=frontmatter,
+                body=staging_item.get("notes") or "",
+                source_image_path=staging_item.get("source_image_path"),
+            )
+            app.catalog.reload()
+            github_token = os.environ.get("HOMEHQ_GITHUB_TOKEN")
+            if github_token:
+                catalog_writer.git_commit_and_push(
+                    repo_dir, f"Add catalog item: {staging_item['name']}", github_token
+                )
+
+        db.delete_staging_item(get_db(), item_id)
+        return redirect(url_for("import_review"))
+
+    @app.route("/import/<int:item_id>/reject", methods=["POST"])
+    @login_required
+    def import_reject(item_id):
+        db.delete_staging_item(get_db(), item_id)
+        return redirect(url_for("import_review"))
 
     @app.route("/catalog/<category>")
     @login_required

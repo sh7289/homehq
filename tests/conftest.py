@@ -15,8 +15,11 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("HOMEHQ_CONTENT_DIR", str(tmp_path / "content"))
     monkeypatch.setenv("HOMEHQ_PHOTOS_DIR", str(tmp_path / "photos"))
     monkeypatch.setenv("HOMEHQ_DB_PATH", str(tmp_path / "pantry.db"))
+    monkeypatch.setenv("HOMEHQ_UPLOADS_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setenv("HOMEHQ_ANTHROPIC_API_KEY", "test-anthropic-key")
     os.makedirs(tmp_path / "content", exist_ok=True)
     os.makedirs(tmp_path / "photos", exist_ok=True)
+    os.makedirs(tmp_path / "uploads", exist_ok=True)
 
     from app import create_app
 

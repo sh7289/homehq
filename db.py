@@ -43,6 +43,28 @@ def init_db(conn):
         )
         """
     )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS import_staging_items (
+            id INTEGER PRIMARY KEY,
+            target_type TEXT NOT NULL,
+            name TEXT NOT NULL,
+            quantity REAL,
+            unit TEXT,
+            storage TEXT,
+            location TEXT,
+            category TEXT,
+            brand TEXT,
+            model TEXT,
+            serial_number TEXT,
+            notes TEXT,
+            source_image_path TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT
+        )
+        """
+    )
     conn.commit()
 
 
@@ -151,3 +173,77 @@ def get_shopping_list_item(conn, item_id):
 def delete_shopping_list_item(conn, item_id):
     with conn:
         conn.execute("DELETE FROM shopping_list_items WHERE id = ?", (item_id,))
+
+
+_STAGING_FIELDS = (
+    "target_type",
+    "name",
+    "quantity",
+    "unit",
+    "storage",
+    "location",
+    "category",
+    "brand",
+    "model",
+    "serial_number",
+    "notes",
+    "source_image_path",
+)
+
+
+def add_staging_item(conn, target_type, name, **fields):
+    values = {field: fields.get(field) for field in _STAGING_FIELDS}
+    values["target_type"] = target_type
+    values["name"] = name
+    columns = list(values.keys()) + ["status", "created_at"]
+    placeholders = ", ".join("?" for _ in columns)
+    with conn:
+        cursor = conn.execute(
+            f"INSERT INTO import_staging_items ({', '.join(columns)}) VALUES ({placeholders})",
+            [*values.values(), "pending", _now()],
+        )
+        return cursor.lastrowid
+
+
+def list_staging_items(conn, status=None):
+    if status is None:
+        rows = conn.execute(
+            "SELECT * FROM import_staging_items ORDER BY created_at"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM import_staging_items WHERE status = ? ORDER BY created_at",
+            (status,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_staging_item(conn, item_id):
+    row = conn.execute(
+        "SELECT * FROM import_staging_items WHERE id = ?", (item_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def update_staging_item(conn, item_id, **fields):
+    updates = {k: v for k, v in fields.items() if k in _STAGING_FIELDS}
+    if not updates:
+        return
+    set_clause = ", ".join(f"{col} = ?" for col in updates)
+    with conn:
+        conn.execute(
+            f"UPDATE import_staging_items SET {set_clause} WHERE id = ?",
+            [*updates.values(), item_id],
+        )
+
+
+def set_staging_item_status(conn, item_id, status):
+    with conn:
+        conn.execute(
+            "UPDATE import_staging_items SET status = ? WHERE id = ?", (status, item_id)
+        )
+
+
+def delete_staging_item(conn, item_id):
+    with conn:
+        conn.execute("DELETE FROM import_staging_items WHERE id = ?", (item_id,))

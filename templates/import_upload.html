@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Import a photo – Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <h1 class="card__title">Import a Photo</h1>
+    <hr class="card__rule">
+    <p class="card__meta">Upload a receipt or a photo of a single item -- the AI decides which, extracts what it can, and stages it for your review before anything touches inventory or the catalog.</p>
+
+    {% if error %}<p class="form-error">{{ error }}</p>{% endif %}
+
+    <form method="post" action="{{ url_for('import_upload') }}" enctype="multipart/form-data">
+      <div class="field">
+        <label for="photo">Photo</label>
+        <input id="photo" type="file" name="photo" accept="image/*" required>
+      </div>
+      <button class="btn btn--primary" type="submit">Upload &amp; extract</button>
+    </form>
+  </div>
+{% endblock %}

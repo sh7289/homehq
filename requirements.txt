@@ -4,3 +4,4 @@ bcrypt==5.0.0
 PyYAML==6.0.3
 gunicorn==23.0.0
 gspread==6.2.1
+anthropic==0.125.0
