@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}{{ storage|capitalize }} – Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="top-actions">
+      <h1 class="card__title">{{ storage|capitalize }}</h1>
+      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
+    </div>
+    <hr class="card__rule">
+    <p class="card__meta">Logged in as {{ user }} &middot; {{ items|length }} item{{ '' if items|length == 1 else 's' }}</p>
+
+    {% if expired or expiring_soon %}
+      <div class="alerts">
+        {% if expired %}
+          <div>
+            <p class="alerts__group-label">Needs attention — expired</p>
+            <ul>
+              {% for item in expired %}
+                <li class="stamp">Expired &middot; {{ item.name }} &middot; {{ item.effective_expiry }}{% if item.effective_expiry_estimated %} (est.){% endif %}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+        {% if expiring_soon %}
+          <div>
+            <p class="alerts__group-label">Expiring within 30 days</p>
+            <ul>
+              {% for item in expiring_soon %}
+                <li class="tag-soon">{{ item.name }} &middot; {{ item.effective_expiry }}{% if item.effective_expiry_estimated %} (est.){% endif %}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <form class="search-bar" method="get" action="{{ url_for(storage) }}">
+      <input type="search" name="q" value="{{ query }}" placeholder="Search {{ storage }}&hellip;">
+      <button class="btn" type="submit">Search</button>
+    </form>
+
+    <ul class="rows">
+      {% for item in items %}
+        <li class="row-item">
+          <div class="row">
+            <span class="row__name">{{ item.name }}</span>
+            <span class="row__meta">{{ item.quantity }} {{ item.unit }}{% if item.location %} &middot; {{ item.location }}{% endif %}</span>
+            {% if item.effective_expiry %}
+              <span class="row__expiry {{ 'row__expiry--expired' if item.expiry_status == 'expired' else ('row__expiry--soon' if item.expiry_status == 'expiring_soon' else '') }}">
+                {{ item.effective_expiry }}{% if item.effective_expiry_estimated %} (est.){% endif %}
+              </span>
+            {% endif %}
+            <span class="row__actions">
+              <form class="inline-form" method="post" action="{{ url_for('inventory_adjust', item_id=item.id) }}">
+                <input type="hidden" name="storage" value="{{ storage }}">
+                <input type="hidden" name="delta" value="-1">
+                <button class="btn btn--sm" type="submit" aria-label="Decrease {{ item.name }}">&minus;</button>
+              </form>
+              <form class="inline-form" method="post" action="{{ url_for('inventory_adjust', item_id=item.id) }}">
+                <input type="hidden" name="storage" value="{{ storage }}">
+                <input type="hidden" name="delta" value="1">
+                <button class="btn btn--sm" type="submit" aria-label="Increase {{ item.name }}">&plus;</button>
+              </form>
+              <button class="btn btn--sm js-edit-toggle" type="button" data-target="edit-{{ item.id }}">Edit</button>
+            </span>
+          </div>
+          <div class="edit-panel" id="edit-{{ item.id }}" hidden>
+            <form method="post" action="{{ url_for('inventory_update', item_id=item.id) }}">
+              <input type="hidden" name="storage" value="{{ storage }}">
+              <div class="form-row">
+                <div class="field">
+                  <label for="quantity-{{ item.id }}">Quantity</label>
+                  <input id="quantity-{{ item.id }}" type="number" step="any" name="quantity" value="{{ item.quantity }}" required>
+                </div>
+                <div class="field">
+                  <label for="unit-{{ item.id }}">Unit</label>
+                  <input id="unit-{{ item.id }}" type="text" name="unit" value="{{ item.unit or '' }}">
+                </div>
+                <div class="field">
+                  <label for="location-{{ item.id }}">Location</label>
+                  <input id="location-{{ item.id }}" type="text" name="location" value="{{ item.location or '' }}">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="field">
+                  <label for="expiry-{{ item.id }}">Expiry date</label>
+                  <input id="expiry-{{ item.id }}" type="date" name="expiry_date" value="{{ item.expiry_date or '' }}">
+                </div>
+                <div class="field">
+                  <label for="acquired-{{ item.id }}">Acquired date</label>
+                  <input id="acquired-{{ item.id }}" type="date" name="acquired_date" value="{{ item.acquired_date or '' }}">
+                </div>
+                <div class="field">
+                  <label for="shelf-life-{{ item.id }}">Shelf life override (days)</label>
+                  <input id="shelf-life-{{ item.id }}" type="number" min="1" name="shelf_life_days" value="{{ item.shelf_life_days or '' }}" placeholder="{{ '1095 default' if storage == 'pantry' else '365 default' }}">
+                </div>
+              </div>
+              <div class="edit-panel__actions">
+                <button class="btn btn--primary btn--sm" type="submit">Save</button>
+                <button class="btn btn--ghost btn--sm js-edit-toggle" type="button" data-target="edit-{{ item.id }}">Cancel</button>
+              </div>
+            </form>
+            <form class="inline-form" method="post" action="{{ url_for('inventory_delete', item_id=item.id) }}">
+              <input type="hidden" name="storage" value="{{ storage }}">
+              <button class="btn btn--sm btn--ghost" type="submit">Delete item</button>
+            </form>
+          </div>
+        </li>
+      {% else %}
+        <li class="row">Nothing logged in the {{ storage }} yet — add the first item below.</li>
+      {% endfor %}
+    </ul>
+
+    <span class="eyebrow">Add item</span>
+    <form method="post" action="{{ url_for(storage + '_add') }}">
+      <div class="form-row">
+        <div class="field">
+          <label for="name">Name</label>
+          <input id="name" type="text" name="name" required>
+        </div>
+        <div class="field">
+          <label for="quantity">Quantity</label>
+          <input id="quantity" type="number" step="any" name="quantity" required>
+        </div>
+        <div class="field">
+          <label for="unit">Unit</label>
+          <input id="unit" type="text" name="unit">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label for="location">Location</label>
+          <input id="location" type="text" name="location">
+        </div>
+        <div class="field">
+          <label for="expiry_date">Expiry date</label>
+          <input id="expiry_date" type="date" name="expiry_date">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label for="acquired_date">Acquired date</label>
+          <input id="acquired_date" type="date" name="acquired_date">
+        </div>
+        <div class="field">
+          <label for="shelf_life_days">Shelf life override (days)</label>
+          <input id="shelf_life_days" type="number" min="1" name="shelf_life_days" placeholder="{{ '1095 default' if storage == 'pantry' else '365 default' }}">
+        </div>
+      </div>
+      <button class="btn btn--primary" type="submit">Add to {{ storage }}</button>
+    </form>
+  </div>
+{% endblock %}

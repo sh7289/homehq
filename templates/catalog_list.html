@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ category }} – Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <h1 class="card__title">{{ category|titlecase }}</h1>
+    <hr class="card__rule">
+    <p class="card__meta">{{ items|length }} item{{ '' if items|length == 1 else 's' }} catalogued</p>
+
+    <ul class="rows">
+      {% for item in items %}
+        <li class="row">
+          <a class="row__name" href="{{ url_for('catalog_detail', category=category, slug=item.slug) }}">{{ item.name }}</a>
+          {% if item.frontmatter.brand %}<span class="row__meta">{{ item.frontmatter.brand }}</span>{% endif %}
+        </li>
+      {% else %}
+        <li class="row">Nothing catalogued under {{ category }} yet.</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endblock %}

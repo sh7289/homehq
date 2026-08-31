@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}Home HQ{% endblock %}</title>
+
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+  <link rel="icon" href="{{ url_for('static', filename='icons/favicon.png') }}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Home HQ">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#3b342c">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  {% if current_user.is_authenticated %}
+    <div class="shell">
+      <a class="wordmark" href="{{ url_for('home') }}">
+        <span class="wordmark__title">Home HQ</span>
+        <span class="wordmark__tag">household ledger</span>
+      </a>
+      <div class="tabs-wrap">
+        <ul class="tabs">
+          <li><a href="{{ url_for('home') }}" class="{{ 'is-active' if active == 'home' else '' }}">Index</a></li>
+          <li><a href="{{ url_for('pantry') }}" class="{{ 'is-active' if active == 'pantry' else '' }}">Pantry</a></li>
+          <li><a href="{{ url_for('freezer') }}" class="{{ 'is-active' if active == 'freezer' else '' }}">Freezer</a></li>
+          {% for category in nav_categories %}
+            <li><a href="{{ url_for('catalog_list', category=category) }}" class="{{ 'is-active' if active == category else '' }}">{{ category|titlecase }}</a></li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% block content %}{% endblock %}
+    </div>
+  {% else %}
+    {% block guest_content %}{% endblock %}
+  {% endif %}
+
+  <script>
+    document.addEventListener("click", function (event) {
+      var toggle = event.target.closest(".js-edit-toggle");
+      if (!toggle) return;
+      var panel = document.getElementById(toggle.dataset.target);
+      if (panel) panel.hidden = !panel.hidden;
+    });
+  </script>
+</body>
+</html>

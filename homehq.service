@@ -1,0 +1,16 @@
+[Unit]
+Description=Home HQ (Flask app)
+After=network.target
+
+[Service]
+Type=simple
+User=homehq
+Group=homehq
+WorkingDirectory=/home/homehq/homehq
+EnvironmentFile=/home/homehq/.homehq.env
+ExecStart=/home/homehq/homehq/.venv/bin/gunicorn --workers 1 --threads 4 --bind 0.0.0.0:8502 "app:create_app()"
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

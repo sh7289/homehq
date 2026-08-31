@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <h1 class="card__title">Index</h1>
+    <hr class="card__rule">
+
+    <span class="eyebrow">Food storage</span>
+    <div class="index-grid index-section">
+      <a href="{{ url_for('pantry') }}">
+        <span class="index-grid__label">Shelf-stable</span>
+        <span class="index-grid__name">Pantry</span>
+      </a>
+      <a href="{{ url_for('freezer') }}">
+        <span class="index-grid__label">Frozen</span>
+        <span class="index-grid__name">Freezer</span>
+      </a>
+    </div>
+
+    <span class="eyebrow">Catalog</span>
+    <div class="index-grid index-section">
+      {% for category in categories %}
+        <a href="{{ url_for('catalog_list', category=category) }}">
+          <span class="index-grid__label">Reference</span>
+          <span class="index-grid__name">{{ category|titlecase }}</span>
+        </a>
+      {% endfor %}
+    </div>
+
+    <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
+  </div>
+{% endblock %}

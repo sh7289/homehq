@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ item.name }} – Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <span class="eyebrow">{{ item.category|titlecase }}</span>
+    <h1 class="card__title">{{ item.name }}</h1>
+    <hr class="card__rule">
+
+    <dl class="spec-list">
+      {% for key, value in item.frontmatter.items() %}
+        {% if key not in ("name", "category", "photos") and value %}
+          <dt>{{ key.replace('_', ' ') }}</dt><dd>{{ value }}</dd>
+        {% endif %}
+      {% endfor %}
+    </dl>
+
+    {% for photo in item.photos %}
+      <span class="photo-frame"><img src="{{ url_for('photo', filename=photo) }}" alt="{{ item.name }}"></span>
+    {% endfor %}
+
+    {% if item.body %}<div class="notes">{{ item.body }}</div>{% endif %}
+  </div>
+{% endblock %}
