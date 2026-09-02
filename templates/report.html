@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Insurance Report – Home HQ{% endblock %}
+{% block content %}
+  <div class="card report">
+    <div class="top-actions no-print">
+      <h1 class="card__title">Insurance Report</h1>
+      <span>
+        <button class="btn btn--sm" type="button" onclick="window.print()">Print / Save as PDF</button>
+        <a class="btn btn--sm" href="{{ url_for('report_csv') }}">Download CSV</a>
+      </span>
+    </div>
+    <h1 class="card__title print-only">Insurance Report</h1>
+    <hr class="card__rule">
+    <p class="card__meta">Generated {{ stats.total_items }} item{{ '' if stats.total_items == 1 else 's' }} catalogued</p>
+
+    <dl class="spec-list report__summary">
+      <dt>Total items</dt><dd>{{ stats.total_items }}</dd>
+      <dt>Total estimated value</dt><dd>${{ "{:,.0f}".format(stats.total_value) }}</dd>
+      <dt>Items with a value estimate</dt><dd>{{ stats.items_with_value }} of {{ stats.total_items }}</dd>
+      <dt>Items missing a photo</dt><dd>{{ stats.items_missing_photo }}</dd>
+    </dl>
+
+    {% for category in categories %}
+      {% set items = catalog[category] %}
+      {% if items %}
+        <h2 class="report__category-title">{{ category|titlecase }} <span class="row__meta">({{ items|length }}{% if stats.by_category[category].total_value %} &middot; ${{ "{:,.0f}".format(stats.by_category[category].total_value) }}{% endif %})</span></h2>
+        <ul class="rows report__items">
+          {% for item in items %}
+            <li class="row report__item">
+              {% if item.photos %}
+                <span class="photo-frame photo-frame--sm"><img src="{{ url_for('photo', filename=item.photos[0]) }}" alt="{{ item.name }}"></span>
+              {% endif %}
+              <span class="report__item-details">
+                <span class="row__name">{{ item.name }}</span>
+                <span class="row__meta">
+                  {% if item.frontmatter.brand %}{{ item.frontmatter.brand }}{% endif %}
+                  {% if item.frontmatter.model %} &middot; {{ item.frontmatter.model }}{% endif %}
+                  {% if item.frontmatter.serial_number %} &middot; SN {{ item.frontmatter.serial_number }}{% endif %}
+                </span>
+              </span>
+              <span class="row__meta">
+                {% if item.frontmatter.estimated_value %}${{ "{:,.0f}".format(item.frontmatter.estimated_value|float) }}{% else %}&mdash;{% endif %}
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endfor %}
+  </div>
+{% endblock %}

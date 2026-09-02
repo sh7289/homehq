@@ -26,6 +26,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 import ai_extract
 import catalog_writer
+import catalog_stats
 import db
 import export_csv
 import expiry
@@ -130,8 +131,9 @@ def create_app():
     @app.route("/")
     @login_required
     def home():
+        stats = catalog_stats.compute_stats(app.catalog.all_items())
         return render_template(
-            "home.html", categories=app.catalog.categories(), active="home"
+            "home.html", categories=app.catalog.categories(), stats=stats, active="home"
         )
 
     def _render_inventory_page(storage):
@@ -367,8 +369,12 @@ def create_app():
             }
             estimated_value = field("estimated_value")
             if estimated_value:
-                frontmatter["estimated_value"] = estimated_value
-                frontmatter["estimated_value_date"] = date.today()
+                try:
+                    value = float(estimated_value)
+                    frontmatter["estimated_value"] = int(value) if value.is_integer() else value
+                    frontmatter["estimated_value_date"] = date.today()
+                except ValueError:
+                    pass
             catalog_writer.write_catalog_item(
                 content_dir,
                 photos_dir,
@@ -393,6 +399,29 @@ def create_app():
     def import_reject(item_id):
         db.delete_staging_item(get_db(), item_id)
         return redirect(url_for("import_review"))
+
+    @app.route("/report")
+    @login_required
+    def report():
+        catalog = app.catalog.all_items()
+        stats = catalog_stats.compute_stats(catalog)
+        return render_template(
+            "report.html",
+            catalog=catalog,
+            categories=sorted(catalog.keys()),
+            stats=stats,
+            active="report",
+        )
+
+    @app.route("/report.csv")
+    @login_required
+    def report_csv():
+        body = export_csv.full_catalog_csv(app.catalog.all_items())
+        return Response(
+            body.encode("utf-8-sig"),
+            mimetype="text/csv",
+            headers={"Content-Disposition": "attachment; filename=insurance-report.csv"},
+        )
 
     @app.route("/catalog/<category>")
     @login_required

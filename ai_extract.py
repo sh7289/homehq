@@ -48,13 +48,14 @@ Single item:
 - Fill in whatever fields you can confidently read; use null for the rest.
 - "notes" is free text: anything else useful you can see (condition,
   distinguishing marks, edition, etc).
-- "estimated_value" is a ROUGH ballpark of current resale/replacement value
-  in USD, based only on your general knowledge of this kind of item (e.g.
-  "$150-250" or "$40") -- NOT a real appraisal or live market lookup. Only
-  provide one for recognizable, valuable-ish items (electronics, tools,
-  collectibles); use null for everyday items or anything you're not
-  reasonably confident about (a manual, a generic kitchen tool, an item
-  you can't identify well enough to guess).
+- "estimated_value" is a ROUGH ballpark of current resale/replacement value,
+  as a single plain number in USD with NO dollar sign, NO commas, and NO
+  range (e.g. 200, not "$150-250" or "$200-300") -- pick one reasonable
+  figure. NOT a real appraisal or live market lookup. Only provide one for
+  recognizable, valuable-ish items (electronics, tools, collectibles); use
+  null for everyday items or anything you're not reasonably confident about
+  (a manual, a generic kitchen tool, an item you can't identify well
+  enough to guess).
 """
 
 
@@ -115,11 +116,22 @@ def parse_extraction_response(response_text):
                 "model": data.get("model"),
                 "serial_number": data.get("serial_number"),
                 "notes": data.get("notes"),
-                "estimated_value": data.get("estimated_value"),
+                "estimated_value": _coerce_value(data.get("estimated_value")),
             }
         ]
 
     raise ExtractionError(f"Unrecognized response kind: {kind!r}")
+
+
+def _coerce_value(raw):
+    """Best-effort coercion to a plain float; None if it isn't parseable
+    (e.g. the model ignored instructions and returned a range/string)."""
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def extract_from_image(image_bytes, media_type, api_key=None, model=None, client=None):

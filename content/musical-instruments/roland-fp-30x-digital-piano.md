@@ -3,7 +3,7 @@ name: Roland FP-30X Digital Piano
 category: musical-instruments
 brand: Roland
 model: FP-30X
-estimated_value: $800-1200
+estimated_value: 1000
 estimated_value_date: 2026-08-31
 photos:
 - musical-instruments/roland-fp-30x-digital-piano-1.jpeg

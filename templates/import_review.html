@@ -112,8 +112,8 @@
                   <input id="notes-{{ item.id }}" type="text" name="notes" value="{{ item.notes or '' }}">
                 </div>
                 <div class="field">
-                  <label for="value-{{ item.id }}">Estimated value <span class="row__meta">(AI ballpark, not an appraisal -- clear it if you don't trust it)</span></label>
-                  <input id="value-{{ item.id }}" type="text" name="estimated_value" value="{{ item.estimated_value or '' }}">
+                  <label for="value-{{ item.id }}">Estimated value, USD <span class="row__meta">(AI ballpark, not an appraisal -- clear it if you don't trust it)</span></label>
+                  <input id="value-{{ item.id }}" type="number" step="any" name="estimated_value" value="{{ item.estimated_value or '' }}">
                 </div>
                 <div class="edit-panel__actions">
                   <button class="btn btn--primary btn--sm" type="submit">Approve &amp; add to catalog</button>

@@ -32,6 +32,7 @@
           <li><a href="{{ url_for('freezer') }}" class="{{ 'is-active' if active == 'freezer' else '' }}">Freezer</a></li>
           <li><a href="{{ url_for('shopping_list') }}" class="{{ 'is-active' if active == 'shopping-list' else '' }}">Shopping List</a></li>
           <li><a href="{{ url_for('import_review') }}" class="{{ 'is-active' if active == 'import' else '' }}">Import</a></li>
+          <li><a href="{{ url_for('report') }}" class="{{ 'is-active' if active == 'report' else '' }}">Report</a></li>
           {% for category in nav_categories %}
             <li><a href="{{ url_for('catalog_list', category=category) }}" class="{{ 'is-active' if active == category else '' }}">{{ category|titlecase }}</a></li>
           {% endfor %}

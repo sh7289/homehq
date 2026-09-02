@@ -21,6 +21,9 @@ class CatalogStore:
     def items(self, category):
         return self._catalog.get(category, [])
 
+    def all_items(self):
+        return dict(self._catalog)
+
     def get(self, category, slug):
         for item in self.items(category):
             if item.slug == slug:

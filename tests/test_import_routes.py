@@ -234,7 +234,7 @@ def test_approve_catalog_item_uses_edited_fields(client, monkeypatch):
             "model": "",
             "serial_number": "",
             "notes": "Miles Davis, 1959 pressing",
-            "estimated_value": "$40",
+            "estimated_value": "40",
         },
     )
 
@@ -244,7 +244,7 @@ def test_approve_catalog_item_uses_edited_fields(client, monkeypatch):
     assert os.path.exists(md_path)
     text = open(md_path).read()
     assert "brand: Columbia Records" in text
-    assert "estimated_value: $40" in text
+    assert "estimated_value: 40" in text
     assert "Miles Davis, 1959 pressing" in text
 
 
@@ -262,7 +262,7 @@ def test_approve_catalog_item_with_estimate_writes_value_and_date(client, monkey
         target_type="catalog",
         name="Turntable",
         category="valuables",
-        estimated_value="$800-1200",
+        estimated_value="1000",
     )
     conn.close()
 
@@ -271,7 +271,7 @@ def test_approve_catalog_item_with_estimate_writes_value_and_date(client, monkey
     content_dir = os.environ["HOMEHQ_CONTENT_DIR"]
     md_path = os.path.join(content_dir, "valuables", "turntable.md")
     text = open(md_path).read()
-    assert "estimated_value: $800-1200" in text
+    assert "estimated_value: 1000" in text
     today = datetime.date.today().isoformat()
     assert f"estimated_value_date: {today}" in text
 

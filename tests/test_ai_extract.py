@@ -48,7 +48,7 @@ def test_parses_catalog_item_response():
             "model": None,
             "serial_number": None,
             "notes": "Miles Davis, 1959 pressing",
-            "estimated_value": "$150-250",
+            "estimated_value": 200,
         }
     )
 
@@ -63,9 +63,31 @@ def test_parses_catalog_item_response():
             "model": None,
             "serial_number": None,
             "notes": "Miles Davis, 1959 pressing",
-            "estimated_value": "$150-250",
+            "estimated_value": 200.0,
         }
     ]
+
+
+def test_coerces_numeric_looking_estimated_value_string():
+    from ai_extract import parse_extraction_response
+
+    response = json.dumps({"kind": "catalog_item", "name": "Amp", "estimated_value": "200"})
+
+    rows = parse_extraction_response(response)
+
+    assert rows[0]["estimated_value"] == 200.0
+
+
+def test_defangs_malformed_estimated_value_to_none():
+    from ai_extract import parse_extraction_response
+
+    response = json.dumps(
+        {"kind": "catalog_item", "name": "Amp", "estimated_value": "$150-250"}
+    )
+
+    rows = parse_extraction_response(response)
+
+    assert rows[0]["estimated_value"] is None
 
 
 def test_parses_catalog_item_response_with_no_value_estimate():

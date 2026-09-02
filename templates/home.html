@@ -21,7 +21,14 @@
       </a>
     </div>
 
-    <span class="eyebrow">Catalog</span>
+    <span class="eyebrow">
+      Catalog
+      {% if stats.total_items %}
+        &middot; {{ stats.total_items }} item{{ '' if stats.total_items == 1 else 's' }}
+        &middot; ${{ "{:,.0f}".format(stats.total_value) }} estimated
+        &middot; <a href="{{ url_for('report') }}">full report</a>
+      {% endif %}
+    </span>
     <div class="index-grid index-section">
       {% for category in categories %}
         <a href="{{ url_for('catalog_list', category=category) }}">
