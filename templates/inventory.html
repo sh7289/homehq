@@ -39,8 +39,10 @@
       <button class="btn" type="submit">Search</button>
     </form>
 
+    {% for group in groups %}
+    <span class="eyebrow">{{ group.label }} &middot; {{ group.rows|length }}</span>
     <ul class="rows">
-      {% for item in items %}
+      {% for item in group.rows %}
         <li class="row-item">
           <div class="row">
             <span class="row__name">{{ item.name }}</span>
@@ -95,6 +97,16 @@
                   <input id="shelf-life-{{ item.id }}" type="number" min="1" name="shelf_life_days" value="{{ item.shelf_life_days or '' }}" placeholder="{{ '1095 default' if storage == 'pantry' else '365 default' }}">
                 </div>
               </div>
+              <div class="form-row">
+                <div class="field">
+                  <label for="section-edit-{{ item.id }}">Section</label>
+                  <select id="section-edit-{{ item.id }}" name="section">
+                    {% for key, label in all_sections %}
+                      <option value="{{ key }}" {{ 'selected' if item.section == key else '' }}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+              </div>
               <div class="edit-panel__actions">
                 <button class="btn btn--primary btn--sm" type="submit">Save</button>
                 <button class="btn btn--ghost btn--sm js-edit-toggle" type="button" data-target="edit-{{ item.id }}">Cancel</button>
@@ -106,10 +118,35 @@
             </form>
           </div>
         </li>
-      {% else %}
-        <li class="row">Nothing logged in the {{ storage }} yet — add the first item below.</li>
       {% endfor %}
     </ul>
+    {% else %}
+    <ul class="rows">
+      <li class="row">Nothing logged in the {{ storage }} yet — add the first item below.</li>
+    </ul>
+    {% endfor %}
+
+    {% if unsectioned and not query %}
+      <span class="eyebrow">Sort into sections &middot; {{ unsectioned|length }} of {{ unsectioned_total }} unsorted</span>
+      <form class="section-sorter" method="post" action="{{ url_for('inventory_assign_sections') }}">
+        <input type="hidden" name="storage" value="{{ storage }}">
+        <ul class="rows">
+          {% for item in unsectioned %}
+            <li class="row">
+              <span class="row__name">{{ item.name }}</span>
+              <span class="row__meta">{{ item.quantity }} {{ item.unit }}</span>
+              <select name="section-{{ item.id }}" aria-label="Section for {{ item.name }}">
+                <option value="">&mdash;</option>
+                {% for key, label in all_sections %}
+                  <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </li>
+          {% endfor %}
+        </ul>
+        <button class="btn btn--primary" type="submit">Save sections</button>
+      </form>
+    {% endif %}
 
     <span class="eyebrow">Add item</span>
     <form method="post" action="{{ url_for(storage + '_add') }}">
@@ -128,6 +165,14 @@
         </div>
       </div>
       <div class="form-row">
+        <div class="field">
+          <label for="section">Section</label>
+          <select id="section" name="section">
+            {% for key, label in all_sections %}
+              <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
         <div class="field">
           <label for="location">Location</label>
           <input id="location" type="text" name="location">

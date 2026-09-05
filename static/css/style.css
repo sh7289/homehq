@@ -498,6 +498,23 @@ button:focus-visible {
   border-bottom: 1px solid var(--line);
 }
 
+/* Bulk section assignment: one dropdown per unsorted item, pushed right so
+   the column of selects lines up and can be worked down quickly. */
+.section-sorter .row select {
+  margin-left: auto;
+  padding: 0.35rem 0.4rem;
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.section-sorter .row select:focus {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+  border-color: var(--teal);
+}
+
 .row__name {
   font-weight: 600;
   margin-right: 0.15rem;

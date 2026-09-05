@@ -31,6 +31,10 @@ def init_db(conn):
         conn.execute("ALTER TABLE pantry_items ADD COLUMN acquired_date TEXT")
     if "shelf_life_days" not in existing_columns:
         conn.execute("ALTER TABLE pantry_items ADD COLUMN shelf_life_days INTEGER")
+    if "section" not in existing_columns:
+        # Nullable on purpose: existing backfilled rows stay untouched and
+        # render under "Other" until they're sorted.
+        conn.execute("ALTER TABLE pantry_items ADD COLUMN section TEXT")
 
     conn.execute(
         """
@@ -71,6 +75,8 @@ def init_db(conn):
     }
     if "estimated_value" not in staging_columns:
         conn.execute("ALTER TABLE import_staging_items ADD COLUMN estimated_value TEXT")
+    if "section" not in staging_columns:
+        conn.execute("ALTER TABLE import_staging_items ADD COLUMN section TEXT")
     conn.commit()
 
 
@@ -88,13 +94,14 @@ def add_item(
     expiry_date=None,
     acquired_date=None,
     shelf_life_days=None,
+    section=None,
 ):
     with conn:
         cursor = conn.execute(
             "INSERT INTO pantry_items "
             "(name, quantity, unit, location, updated_at, storage, expiry_date, "
-            "acquired_date, shelf_life_days) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "acquired_date, shelf_life_days, section) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 quantity,
@@ -105,6 +112,7 @@ def add_item(
                 expiry_date,
                 acquired_date,
                 shelf_life_days,
+                section,
             ),
         )
         return cursor.lastrowid
@@ -130,12 +138,20 @@ def adjust_quantity(conn, item_id, delta):
 
 
 def update_item(
-    conn, item_id, quantity, unit, location, expiry_date, acquired_date, shelf_life_days
+    conn,
+    item_id,
+    quantity,
+    unit,
+    location,
+    expiry_date,
+    acquired_date,
+    shelf_life_days,
+    section=None,
 ):
     with conn:
         conn.execute(
             "UPDATE pantry_items SET quantity = ?, unit = ?, location = ?, expiry_date = ?, "
-            "acquired_date = ?, shelf_life_days = ?, updated_at = ? WHERE id = ?",
+            "acquired_date = ?, shelf_life_days = ?, section = ?, updated_at = ? WHERE id = ?",
             (
                 quantity,
                 unit,
@@ -143,9 +159,19 @@ def update_item(
                 expiry_date,
                 acquired_date,
                 shelf_life_days,
+                section,
                 _now(),
                 item_id,
             ),
+        )
+
+
+def set_section(conn, item_id, section):
+    """Set just the section, for the bulk-assignment screen."""
+    with conn:
+        conn.execute(
+            "UPDATE pantry_items SET section = ?, updated_at = ? WHERE id = ?",
+            (section, _now(), item_id),
         )
 
 

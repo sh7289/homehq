@@ -31,7 +31,14 @@ import db
 import export_csv
 import expiry
 import matching
+import sections
 from catalog_store import CatalogStore
+
+
+# How many unsorted items the bulk section-assignment form offers at once.
+# The backfilled pantry has ~106 unsorted rows; showing them all would render
+# every item twice and make the page unusable on a phone.
+SECTION_SORTER_BATCH = 15
 
 
 class User(UserMixin):
@@ -142,11 +149,16 @@ def create_app():
         if query:
             items = [item for item in items if query in item["name"].lower()]
         expired, expiring_soon = expiry.split_by_expiry(items, storage=storage)
+        unsectioned = [item for item in items if not item.get("section")]
         return render_template(
             "inventory.html",
             storage=storage,
             user=current_user.id,
             items=items,
+            groups=sections.group_items(items, storage),
+            all_sections=sections.sections_for(storage),
+            unsectioned=unsectioned[:SECTION_SORTER_BATCH],
+            unsectioned_total=len(unsectioned),
             expired=expired,
             expiring_soon=expiring_soon,
             query=query,
@@ -167,6 +179,7 @@ def create_app():
             expiry_date=expiry_date,
             acquired_date=acquired_date,
             shelf_life_days=int(shelf_life_days) if shelf_life_days else None,
+            section=sections.normalize(storage, request.form.get("section")),
         )
         return redirect(url_for(storage))
 
@@ -210,6 +223,7 @@ def create_app():
     @login_required
     def inventory_update(item_id):
         shelf_life_days = request.form.get("shelf_life_days", "").strip()
+        storage = request.form.get("storage") or "pantry"
         db.update_item(
             get_db(),
             item_id,
@@ -219,7 +233,25 @@ def create_app():
             expiry_date=request.form.get("expiry_date", "").strip() or None,
             acquired_date=request.form.get("acquired_date", "").strip() or None,
             shelf_life_days=int(shelf_life_days) if shelf_life_days else None,
+            section=sections.normalize(storage, request.form.get("section")),
         )
+        return _redirect_to_storage_page()
+
+    @app.route("/inventory/sections", methods=["POST"])
+    @login_required
+    def inventory_assign_sections():
+        """Bulk-sort the backfilled rows that predate sections."""
+        storage = request.form.get("storage") or "pantry"
+        conn = get_db()
+        for field, value in request.form.items():
+            if not field.startswith("section-"):
+                continue
+            try:
+                item_id = int(field[len("section-") :])
+            except ValueError:
+                continue
+            if value:
+                db.set_section(conn, item_id, sections.normalize(storage, value))
         return _redirect_to_storage_page()
 
     @app.route("/shopping-list")
