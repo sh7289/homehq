@@ -7,3 +7,11 @@ __pycache__/
 *.db-wal
 *.db-shm
 /uploads/
+# Belt and braces: backup.py refuses to write inside the repo, but the catalog
+# auto-commit runs `git add -A` here, so anything sensitive gets an entry.
+/backups/
+*.gpg
+
+# Security and vault planning docs stay off GitHub -- they describe the box's
+# weak points in detail. Keep them here, backed up with the password manager.
+docs/plans/private/

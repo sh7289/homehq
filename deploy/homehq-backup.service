@@ -1,0 +1,17 @@
+[Unit]
+Description=Home HQ encrypted database backup
+After=network.target
+
+[Service]
+Type=oneshot
+User=homehq
+Group=homehq
+WorkingDirectory=/home/homehq/homehq
+# Main config (DB path, content dir). The backup passphrase lives in its own
+# 0600 file so it is not in the env file you cat while debugging the app.
+EnvironmentFile=/home/homehq/.homehq.env
+EnvironmentFile=/home/homehq/.homehq-backup.env
+ExecStart=/home/homehq/homehq/.venv/bin/python scripts/backup.py
+
+[Install]
+WantedBy=multi-user.target

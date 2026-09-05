@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly Home HQ encrypted database backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+# Still run if the box was asleep/off at 03:15.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
