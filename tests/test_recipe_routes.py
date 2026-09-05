@@ -57,6 +57,35 @@ def test_recipes_page_groups_by_kind(client, app):
     assert body.index("Buttermilk Scones") < body.index("Chicken Tinga Tacos")
 
 
+def test_listing_meta_has_no_orphan_separator(client, app):
+    _write_recipe(
+        app,
+        "plain.md",
+        "---\nname: Plain Thing\nkind: meal\n---\nDo it.\n",
+    )
+    _login(client)
+
+    body = client.get("/recipes").data.decode()
+
+    assert "Plain Thing" in body
+    assert '<span class="row__meta">·' not in body
+    assert '<span class="row__meta"> ·' not in body
+
+
+def test_listing_shows_the_imported_category(client, app):
+    _write_recipe(
+        app,
+        "chili.md",
+        "---\nname: Chili\nkind: meal\ncategory: Chili / Soup\neffort: 3\n---\nSimmer.\n",
+    )
+    _login(client)
+
+    body = client.get("/recipes").data.decode()
+
+    assert "Chili / Soup" in body
+    assert "effort 3/5" in body
+
+
 def test_recipes_page_filters_by_kind(client, app):
     _write_recipe(app, "tinga.md", TINGA)
     _write_recipe(app, "scones.md", SCONES)

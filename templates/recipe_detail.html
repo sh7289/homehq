@@ -9,6 +9,12 @@
     <hr class="card__rule">
     <p class="card__meta">
       {{ recipe.kind|titlecase }}
+      {% if recipe.frontmatter.category %} &middot; {{ recipe.frontmatter.category }}{% endif %}
+      {% if recipe.frontmatter.protein %} &middot; {{ recipe.frontmatter.protein }}{% endif %}
+      {% if recipe.frontmatter.season %} &middot; {{ recipe.frontmatter.season }}{% endif %}
+      {% if recipe.frontmatter.leftovers %} &middot; leftovers: {{ recipe.frontmatter.leftovers }}{% endif %}
+      {% if recipe.frontmatter.freezer_friendly %} &middot; freezer: {{ recipe.frontmatter.freezer_friendly }}{% endif %}
+      {% if recipe.frontmatter.garden_herbs %} &middot; herbs: {{ recipe.frontmatter.garden_herbs }}{% endif %}
       {% if recipe.cuisine %} &middot; {{ recipe.cuisine|titlecase }}{% endif %}
       {% if recipe.effort %} &middot; effort {{ recipe.effort }}/5{% endif %}
       {% if recipe.frontmatter.active_minutes %} &middot; {{ recipe.frontmatter.active_minutes }} min active{% endif %}

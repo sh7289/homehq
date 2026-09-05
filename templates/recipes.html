@@ -32,11 +32,14 @@
         {% for recipe in group.recipes %}
           <li class="row">
             <span class="row__name"><a href="{{ url_for('recipe_detail', slug=recipe.slug) }}">{{ recipe.name }}</a></span>
-            <span class="row__meta">
-              {% if recipe.cuisine %}{{ recipe.cuisine|titlecase }}{% endif %}
-              {% if recipe.effort %} &middot; effort {{ recipe.effort }}/5{% endif %}
-              {% if recipe.frontmatter.serves %} &middot; serves {{ recipe.frontmatter.serves }}{% endif %}
-            </span>
+            {# Build the meta as a list so a missing field never leaves an
+               orphan separator behind. #}
+            {%- set bits = [] -%}
+            {%- if recipe.frontmatter.category %}{{- bits.append(recipe.frontmatter.category) or '' -}}{% endif -%}
+            {%- if recipe.cuisine %}{{- bits.append(recipe.cuisine|titlecase) or '' -}}{% endif -%}
+            {%- if recipe.effort %}{{- bits.append('effort ' ~ recipe.effort ~ '/5') or '' -}}{% endif -%}
+            {%- if recipe.frontmatter.serves %}{{- bits.append('serves ' ~ recipe.frontmatter.serves) or '' -}}{% endif -%}
+            <span class="row__meta">{{ bits|join(' · ') }}</span>
             {% if recipe.is_favorite %}<span class="tag-fav">Favorite</span>{% endif %}
           </li>
         {% endfor %}
