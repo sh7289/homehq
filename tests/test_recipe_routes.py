@@ -135,6 +135,35 @@ def test_method_hard_wraps_flow_into_one_paragraph(client, app):
     assert body.count("<p class=\"recipe-body__para\">") == 2
 
 
+def test_bold_markers_in_notes_render_as_strong(client, app):
+    _write_recipe(
+        app,
+        "bold.md",
+        "---\nname: Bold\nkind: meal\n---\n**Serve with:** Cheddar and sour cream.\n",
+    )
+    _login(client)
+
+    body = client.get("/recipes/bold").data.decode()
+
+    assert "<strong>Serve with:</strong>" in body
+    assert "**Serve with:**" not in body
+
+
+def test_html_in_notes_is_escaped(client, app):
+    """Notes are author-controlled, but never trust them into raw HTML."""
+    _write_recipe(
+        app,
+        "sneaky.md",
+        "---\nname: Sneaky\nkind: meal\n---\nUse <script>alert(1)</script> tongs.\n",
+    )
+    _login(client)
+
+    body = client.get("/recipes/sneaky").data.decode()
+
+    assert "<script>alert(1)</script>" not in body
+    assert "&lt;script&gt;" in body
+
+
 def test_recipe_detail_404s_for_unknown_slug(client):
     _login(client)
 

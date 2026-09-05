@@ -39,9 +39,12 @@
           {% endif %}
         </li>
       {% else %}
-        <li class="row">No ingredients recorded.</li>
+        <li class="row">No ingredients recorded — nothing downstream (shopping lists, meal plans) can use this recipe until they're added.</li>
       {% endfor %}
     </ul>
+    <a class="btn btn--sm" href="{{ url_for('recipe_ingredients', slug=recipe.slug) }}">
+      {% if recipe.ingredients %}Edit ingredients{% else %}Add ingredients{% endif %}
+    </a>
 
     {% if recipe.body %}
       <span class="eyebrow">Method</span>

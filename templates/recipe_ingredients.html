@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Ingredients – {{ recipe.name }}{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="top-actions">
+      <h1 class="card__title">{{ recipe.name }}</h1>
+      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
+    </div>
+    <hr class="card__rule">
+    <p class="card__meta">Ingredients</p>
+
+    {% if error %}
+      <p class="form-error">{{ error }}</p>
+    {% endif %}
+
+    {% if suggested %}
+      <p class="form-note">
+        Proposed from this recipe's notes — nothing is saved yet. Check the
+        amounts and the fresh/staple flags, then save.
+      </p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('recipe_ingredients', slug=recipe.slug) }}">
+      <div class="field">
+        <label for="ingredients">One ingredient per line</label>
+        <textarea id="ingredients" name="ingredients" rows="12"
+                  placeholder="ground beef | 1 | lb | fresh&#10;cumin | 2 | tsp | staple&#10;kidney beans | 1 | can">{{ lines }}</textarea>
+        <span class="field__help">{{ ingredient_help }}</span>
+      </div>
+      <button class="btn btn--primary" type="submit">Save ingredients</button>
+    </form>
+
+    <form method="post" action="{{ url_for('recipe_suggest_ingredients', slug=recipe.slug) }}">
+      <button class="btn" type="submit">
+        {% if recipe.ingredients %}Re-read from notes{% else %}Read from notes{% endif %}
+      </button>
+    </form>
+
+    {% if recipe.body %}
+      <span class="eyebrow">Notes it reads from</span>
+      <div class="recipe-body">
+        {% for para in recipe.body|paragraphs %}
+          <p class="recipe-body__para">{{ para }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <a class="btn btn--ghost" href="{{ url_for('recipe_detail', slug=recipe.slug) }}">Back to recipe</a>
+  </div>
+{% endblock %}

@@ -23,6 +23,7 @@ from flask_login import (
     login_user,
     logout_user,
 )
+from markupsafe import Markup, escape
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import ai_extract
@@ -131,9 +132,20 @@ def create_app():
         Recipes get pasted in wrapped at 80 characters, so rendering newlines
         literally breaks sentences mid-line. This is what markdown itself
         does with the same input.
+
+        `**bold**` becomes <strong> -- the recipe importer writes it and
+        people paste it. Everything is HTML-escaped *first*, so the only tags
+        that survive are the ones added here.
         """
-        blocks = re.split(r"\n\s*\n", (text or "").strip())
-        return [" ".join(block.split()) for block in blocks if block.strip()]
+        paragraphs = []
+        for block in re.split(r"\n\s*\n", (text or "").strip()):
+            if not block.strip():
+                continue
+            escaped = str(escape(" ".join(block.split())))
+            paragraphs.append(
+                Markup(re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped))
+            )
+        return paragraphs
 
     @app.context_processor
     def inject_nav():
@@ -492,6 +504,70 @@ def create_app():
             form={},
             ingredient_help=_INGREDIENT_HELP,
             active="recipes",
+        )
+
+    def _render_ingredient_editor(recipe, lines, error=None, suggested=False):
+        return render_template(
+            "recipe_ingredients.html",
+            recipe=recipe,
+            lines=lines,
+            error=error,
+            suggested=suggested,
+            ingredient_help=_INGREDIENT_HELP,
+            active="recipes",
+        )
+
+    @app.route("/recipes/<slug>/ingredients", methods=["GET", "POST"])
+    @login_required
+    def recipe_ingredients(slug):
+        recipe = app.recipes.get(slug)
+        if recipe is None:
+            abort(404)
+
+        if request.method == "POST":
+            recipe_writer.set_ingredients(
+                recipes_dir,
+                slug,
+                _parse_ingredient_lines(request.form.get("ingredients")),
+            )
+            app.recipes.reload()
+            return redirect(url_for("recipe_detail", slug=slug))
+
+        return _render_ingredient_editor(
+            recipe, recipe_writer.ingredients_to_lines(recipe.ingredients)
+        )
+
+    @app.route("/recipes/<slug>/suggest-ingredients", methods=["POST"])
+    @login_required
+    def recipe_suggest_ingredients(slug):
+        """Propose ingredients from the recipe's own notes.
+
+        Deliberately does not write anything -- the proposal lands in the
+        editable textarea and the human commits it.
+        """
+        recipe = app.recipes.get(slug)
+        if recipe is None:
+            abort(404)
+
+        current = recipe_writer.ingredients_to_lines(recipe.ingredients)
+        try:
+            api_key = os.environ["HOMEHQ_ANTHROPIC_API_KEY"]
+        except KeyError:
+            return _render_ingredient_editor(
+                recipe,
+                current,
+                error="AI extraction isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY.",
+            )
+
+        try:
+            proposed = ai_extract.extract_ingredients(
+                recipe.name, recipe.body, api_key=api_key
+            )
+        except ai_extract.ExtractionError as exc:
+            return _render_ingredient_editor(recipe, current, error=str(exc))
+
+        return _render_ingredient_editor(
+            recipe, recipe_writer.ingredients_to_lines(proposed), suggested=True
         )
 
     @app.route("/recipes/<slug>")

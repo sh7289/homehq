@@ -3,6 +3,7 @@ import os
 
 import anthropic
 
+import recipe_loader
 import sections
 
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
@@ -93,6 +94,37 @@ The user said:
 """
 
 
+_INGREDIENTS_PROMPT = """Below are cooking notes for a recipe. Pull out the
+ingredients they mention.
+
+Respond with ONLY a JSON object (no prose, no markdown fences):
+
+{{"kind": "ingredients", "items": [
+  {{"name": "ground beef", "quantity": 1, "unit": "lb", "fresh": true,
+   "staple": false}}
+]}}
+
+- "quantity" and "unit" may be null. These notes are terse and often name an
+  ingredient without an amount. Null is correct; do NOT invent quantities.
+- "fresh" is true for produce, dairy, fresh meat and fish, and fresh herbs --
+  anything bought for this week. Fresh items always go on the shopping list.
+- "staple" is true for spices, dried herbs, oils, vinegars, flour, sugar and
+  similar cupboard basics that a kitchen always has.
+- An ingredient is not both fresh and staple. If neither applies (tinned,
+  jarred, dried, frozen goods), set both false.
+- Name the ingredient as you would write it on a shopping list: "ground beef",
+  not "lean ground beef 90/10 preferred". Put nothing else in the name.
+- Include ingredients mentioned in serving suggestions.
+- Do not invent ingredients that the notes do not mention, even if the dish
+  would normally use them.
+
+Recipe: {name}
+
+Notes:
+{text}
+"""
+
+
 class ExtractionError(Exception):
     pass
 
@@ -171,6 +203,58 @@ def _coerce_value(raw):
         return float(raw)
     except (TypeError, ValueError):
         return None
+
+
+def parse_ingredients_response(response_text):
+    """Parse an ingredients reply into normalized ingredient dicts.
+
+    A single unusable entry is dropped rather than failing the whole
+    extraction -- losing 11 good ingredients over one bad one is worse than
+    the human deleting a stray line on the review screen.
+    """
+    try:
+        data = json.loads(_strip_code_fence(response_text))
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ExtractionError(f"Model response was not valid JSON: {exc}") from exc
+
+    if not isinstance(data, dict) or "items" not in data:
+        raise ExtractionError("Response did not contain an 'items' list")
+
+    ingredients = []
+    for raw in data.get("items") or []:
+        try:
+            ingredient = recipe_loader.normalize_ingredient(raw)
+        except (ValueError, TypeError):
+            continue
+        if ingredient["fresh"] and ingredient["staple"]:
+            # Mutually exclusive by definition; fresh is the safer call
+            # because it keeps the item on the shopping list.
+            ingredient["staple"] = False
+        ingredients.append(ingredient)
+    return ingredients
+
+
+def extract_ingredients(name, text, api_key=None, model=None, client=None):
+    """Propose structured ingredients from a recipe's freeform notes."""
+    if client is None:
+        client = anthropic.Anthropic(api_key=api_key or os.environ["HOMEHQ_ANTHROPIC_API_KEY"])
+
+    message = client.messages.create(
+        model=model or DEFAULT_MODEL,
+        max_tokens=2048,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": _INGREDIENTS_PROMPT.format(name=name, text=text),
+                    }
+                ],
+            }
+        ],
+    )
+    return parse_ingredients_response(message.content[0].text)
 
 
 def extract_from_text(text, api_key=None, model=None, client=None):
