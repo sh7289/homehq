@@ -3,6 +3,8 @@ import os
 
 import anthropic
 
+import sections
+
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
 _VALID_CATEGORIES = (
@@ -59,6 +61,38 @@ Single item:
 """
 
 
+def _section_prompt_lines():
+    """Render the valid section keys so the prompt can't drift from sections.py."""
+    pantry = ", ".join(key for key, _ in sections.sections_for("pantry"))
+    freezer = ", ".join(key for key, _ in sections.sections_for("freezer"))
+    return f"  pantry: {pantry}\n  freezer: {freezer}"
+
+
+_TEXT_PROMPT = """The user is describing food they are adding to their pantry
+or freezer, in their own words. It may be dictated speech, so expect run-on
+phrasing and filler.
+
+Respond with ONLY a JSON object (no prose, no markdown fences):
+
+{{"kind": "pantry_items", "items": [
+  {{"name": "...", "quantity": 2, "unit": "can", "storage": "pantry",
+   "section": "canned"}}
+]}}
+
+- "storage" is "pantry" or "freezer" -- frozen things go to "freezer".
+- "section" must be exactly one of these, matching the item's storage:
+{sections}
+- "quantity" and "unit" may be null. If the user did not say how much
+  ("some rice left", "a bit of flour"), use null rather than guessing a
+  number -- a wrong number is worse than a blank the human fills in.
+- Split a list into one entry per distinct item.
+- Ignore anything that isn't food being added.
+
+The user said:
+{text}
+"""
+
+
 class ExtractionError(Exception):
     pass
 
@@ -83,19 +117,24 @@ def parse_extraction_response(response_text):
 
     kind = data.get("kind")
 
-    if kind == "receipt":
+    if kind in ("receipt", "pantry_items"):
         rows = []
         for raw_item in data.get("items", []):
             name = raw_item.get("name")
             if not name:
-                raise ExtractionError("Receipt item is missing a name")
+                raise ExtractionError("Item is missing a name")
+            storage = raw_item.get("storage") or "pantry"
             rows.append(
                 {
                     "target_type": "inventory",
                     "name": name,
                     "quantity": raw_item.get("quantity"),
                     "unit": raw_item.get("unit"),
-                    "storage": raw_item.get("storage") or "pantry",
+                    "storage": storage,
+                    # normalize() is validated against the item's own storage,
+                    # so a pantry section on a freezer item collapses to
+                    # "other" rather than silently sticking.
+                    "section": sections.normalize(storage, raw_item.get("section")),
                 }
             )
         return rows
@@ -132,6 +171,35 @@ def _coerce_value(raw):
         return float(raw)
     except (TypeError, ValueError):
         return None
+
+
+def extract_from_text(text, api_key=None, model=None, client=None):
+    """Turn a free-text description of groceries into staging-item rows.
+
+    This is also the voice path: iOS keyboard dictation types into the same
+    textarea, so no speech-to-text service is involved.
+    """
+    if client is None:
+        client = anthropic.Anthropic(api_key=api_key or os.environ["HOMEHQ_ANTHROPIC_API_KEY"])
+
+    message = client.messages.create(
+        model=model or DEFAULT_MODEL,
+        max_tokens=2048,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": _TEXT_PROMPT.format(
+                            sections=_section_prompt_lines(), text=text
+                        ),
+                    }
+                ],
+            }
+        ],
+    )
+    return parse_extraction_response(message.content[0].text)
 
 
 def extract_from_image(image_bytes, media_type, api_key=None, model=None, client=None):

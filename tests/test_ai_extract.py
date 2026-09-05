@@ -25,6 +25,9 @@ def test_parses_receipt_response_into_inventory_staging_rows():
             "quantity": 2,
             "unit": "bags",
             "storage": "pantry",
+            # The receipt prompt doesn't ask for a section yet, so these fall
+            # back to "other" and get sorted on the review screen.
+            "section": "other",
         },
         {
             "target_type": "inventory",
@@ -32,6 +35,7 @@ def test_parses_receipt_response_into_inventory_staging_rows():
             "quantity": 1,
             "unit": "bag",
             "storage": "freezer",
+            "section": "other",
         },
     ]
 

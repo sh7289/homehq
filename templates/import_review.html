@@ -73,6 +73,14 @@
                     <option value="freezer" {{ 'selected' if item.storage == 'freezer' }}>Freezer</option>
                   </select>
                 </div>
+                <div class="field">
+                  <label for="section-{{ item.id }}">Section</label>
+                  <select id="section-{{ item.id }}" name="section">
+                    {% for key, label in section_choices[item.storage or 'pantry'] %}
+                      <option value="{{ key }}" {{ 'selected' if item.section == key else '' }}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
                 <div class="edit-panel__actions">
                   <button class="btn btn--sm" type="submit">Add as new item</button>
                 </div>

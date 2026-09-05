@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Capture – Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="top-actions">
+      <h1 class="card__title">Capture</h1>
+      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
+    </div>
+    <hr class="card__rule">
+    <p class="card__meta">
+      Describe what you're putting away and it gets staged for review — nothing
+      is added to the pantry until you approve it. On a phone, tap the
+      microphone on the keyboard and just say it.
+    </p>
+
+    {% if error %}
+      <p class="form-error">{{ error }}</p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('capture') }}">
+      <div class="field">
+        <label for="text">What are you adding?</label>
+        <textarea id="text" name="text" rows="5"
+                  placeholder="two cans of chickpeas, a bag of jasmine rice, some frozen peas, half a bottle of olive oil">{{ text }}</textarea>
+      </div>
+      <button class="btn btn--primary" type="submit">Read it</button>
+    </form>
+
+    <span class="eyebrow">Tips</span>
+    <ul class="rows">
+      <li class="row">Say amounts if you know them — "two cans", "a bag". If you don't, leave it out and fill it in on the review screen.</li>
+      <li class="row">Mention frozen things as frozen so they land in the freezer.</li>
+      <li class="row">Photographing a receipt? Use <a href="{{ url_for('import_upload') }}">Import</a> instead.</li>
+    </ul>
+  </div>
+{% endblock %}

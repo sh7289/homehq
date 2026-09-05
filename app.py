@@ -332,6 +332,10 @@ def create_app():
             items=pending,
             suggestions=suggestions,
             categories=app.catalog.categories(),
+            section_choices={
+                "pantry": sections.sections_for("pantry"),
+                "freezer": sections.sections_for("freezer"),
+            },
             active="import",
         )
 
@@ -370,6 +374,43 @@ def create_app():
 
         return render_template("import_upload.html", error=None)
 
+    @app.route("/capture", methods=["GET", "POST"])
+    @login_required
+    def capture():
+        if request.method != "POST":
+            return render_template("capture.html", error=None, text="", active="capture")
+
+        text = request.form.get("text", "").strip()
+        if not text:
+            return render_template(
+                "capture.html",
+                error="Describe what you're adding first.",
+                text="",
+                active="capture",
+            )
+
+        try:
+            api_key = os.environ["HOMEHQ_ANTHROPIC_API_KEY"]
+        except KeyError:
+            return render_template(
+                "capture.html",
+                error="AI capture isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY.",
+                text=text,
+                active="capture",
+            )
+
+        try:
+            rows = ai_extract.extract_from_text(text, api_key=api_key)
+        except ai_extract.ExtractionError as exc:
+            # Keep the user's words so they can retry without retyping.
+            return render_template(
+                "capture.html", error=str(exc), text=text, active="capture"
+            )
+
+        for row in rows:
+            db.add_staging_item(get_db(), **row)
+        return redirect(url_for("import_review"))
+
     @app.route("/import/<int:item_id>/approve", methods=["POST"])
     @login_required
     def import_approve(item_id):
@@ -394,6 +435,9 @@ def create_app():
                     unit=field("unit") or "",
                     location="",
                     storage=field("storage") or "pantry",
+                    section=sections.normalize(
+                        field("storage") or "pantry", field("section")
+                    ),
                 )
         else:
             frontmatter = {

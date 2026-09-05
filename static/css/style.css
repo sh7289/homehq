@@ -87,7 +87,8 @@ button {
 
 button,
 input,
-select {
+select,
+textarea {
   font-family: inherit;
   font-size: 1rem; /* keep >=16px: prevents iOS Safari zooming in on focus */
 }
@@ -297,7 +298,8 @@ select {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   border: none;
   border-bottom: 1.5px solid var(--line);
   background: transparent;
@@ -307,6 +309,7 @@ select {
 
 .field input:focus,
 .field select:focus,
+.field textarea:focus,
 a:focus-visible,
 button:focus-visible {
   outline: 2px solid var(--teal);
@@ -314,8 +317,18 @@ button:focus-visible {
 }
 
 .field input:focus,
-.field select:focus {
+.field select:focus,
+.field textarea:focus {
   border-bottom-color: var(--teal);
+}
+
+.field textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  padding: 0.6rem;
 }
 
 .form-row {

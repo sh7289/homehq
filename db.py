@@ -221,6 +221,7 @@ _STAGING_FIELDS = (
     "notes",
     "estimated_value",
     "source_image_path",
+    "section",
 )
 
 
