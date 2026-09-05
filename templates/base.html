@@ -30,6 +30,7 @@
           <li><a href="{{ url_for('home') }}" class="{{ 'is-active' if active == 'home' else '' }}">Index</a></li>
           <li><a href="{{ url_for('pantry') }}" class="{{ 'is-active' if active == 'pantry' else '' }}">Pantry</a></li>
           <li><a href="{{ url_for('freezer') }}" class="{{ 'is-active' if active == 'freezer' else '' }}">Freezer</a></li>
+          <li><a href="{{ url_for('recipes') }}" class="{{ 'is-active' if active == 'recipes' else '' }}">Recipes</a></li>
           <li><a href="{{ url_for('shopping_list') }}" class="{{ 'is-active' if active == 'shopping-list' else '' }}">Shopping List</a></li>
           <li><a href="{{ url_for('capture') }}" class="{{ 'is-active' if active == 'capture' else '' }}">Capture</a></li>
           <li><a href="{{ url_for('import_review') }}" class="{{ 'is-active' if active == 'import' else '' }}">Import</a></li>

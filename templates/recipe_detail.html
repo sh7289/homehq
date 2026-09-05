@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ recipe.name }} – Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="top-actions">
+      <h1 class="card__title">{{ recipe.name }}</h1>
+      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
+    </div>
+    <hr class="card__rule">
+    <p class="card__meta">
+      {{ recipe.kind|titlecase }}
+      {% if recipe.cuisine %} &middot; {{ recipe.cuisine|titlecase }}{% endif %}
+      {% if recipe.effort %} &middot; effort {{ recipe.effort }}/5{% endif %}
+      {% if recipe.frontmatter.active_minutes %} &middot; {{ recipe.frontmatter.active_minutes }} min active{% endif %}
+      {% if recipe.frontmatter.total_minutes %} &middot; {{ recipe.frontmatter.total_minutes }} min total{% endif %}
+      {% if recipe.frontmatter.serves %} &middot; serves {{ recipe.frontmatter.serves }}{% endif %}
+      {% if recipe.is_favorite %} &middot; favorite{% endif %}
+    </p>
+
+    <span class="eyebrow">Ingredients</span>
+    <ul class="rows">
+      {% for ingredient in recipe.ingredients %}
+        <li class="row">
+          <span class="row__name">{{ ingredient.name }}</span>
+          <span class="row__meta">
+            {% if ingredient.quantity %}{{ ingredient.quantity }}{% endif %}
+            {{ ingredient.unit or '' }}
+          </span>
+          {% if ingredient.fresh %}
+            <span class="tag-fresh" title="Always added to the shopping list — the pantry doesn't track fresh goods">Fresh</span>
+          {% elif ingredient.staple %}
+            <span class="tag-staple" title="Assumed on hand unless the pantry says otherwise">Staple</span>
+          {% endif %}
+        </li>
+      {% else %}
+        <li class="row">No ingredients recorded.</li>
+      {% endfor %}
+    </ul>
+
+    {% if recipe.body %}
+      <span class="eyebrow">Method</span>
+      <div class="recipe-body">
+        {% for para in recipe.body|paragraphs %}
+          <p class="recipe-body__para">{{ para }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if recipe.frontmatter.source %}
+      <p class="card__meta"><a href="{{ recipe.frontmatter.source }}">Source</a></p>
+    {% endif %}
+
+    <a class="btn btn--ghost" href="{{ url_for('recipes') }}">Back to recipes</a>
+  </div>
+{% endblock %}

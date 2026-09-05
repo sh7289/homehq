@@ -85,8 +85,8 @@ CREATE TABLE IF NOT EXISTS meal_plans (
 );
 ```
 
-Storing the raw response means the review page survives a refresh without
-re-calling the API, and approve is idempotent.
+Storing the raw response means the review page survives a refresh without a
+second API call, and approve is idempotent.
 
 ---
 
@@ -98,12 +98,40 @@ cutoff — and what that row literally says (`Cumin · 200 g`).
 **What it will not know:** how much of it you have in the units the recipe wants.
 Not roughly. At all.
 
-Each ingredient lands in one of three buckets; the human resolves bucket 2:
+### Fresh goods are never netted (decided 2026-09-05)
+
+The pantry and freezer deliberately do **not** track fresh goods — produce,
+dairy, fresh meat, herbs. Turnover is high enough that a row would be wrong
+more often than right, and "we have it" is not the same as "it's still good".
+
+So `fresh: true` ingredients **always go on the shopping list**, whatever the
+inventory says. No match attempt, no *Check* prompt, no chance of the app
+talking you out of buying a lemon that turned last week.
+
+This is what makes the whole netting design tractable: the matching logic now
+runs only against the classes of item the inventory is actually reliable for
+(shelf-stable and frozen), which is exactly where it earns its keep. The
+*Check* bucket shrinks from "most of the list" to a handful of tins and bags.
+
+**Boundary cases stay on the list.** Onions, potatoes, garlic, eggs and butter
+straddle the line. The rule is one-directional: a `fresh` ingredient is never
+removed from the list, but if it happens to name-match an inventory row the UI
+annotates it *"pantry says: Onions · 3"* so you can uncheck it yourself. Never
+silently omitted.
+
+**Who decides what's fresh:** the recipe file. `fresh: true` on the ingredient,
+set by whoever adds the recipe and pre-filled by the AI on paste-import (a
+judgment the model makes well). Not a hardcoded list of food names.
+
+### Buckets
+
+Each ingredient lands in one of four; the human only resolves *Check*:
 
 | Bucket | Condition | Default | UI |
 |---|---|---|---|
+| **Fresh** | `fresh: true` | **always listed**, pre-checked | recipe's amount as the note; annotated if a row happens to match |
 | On hand | `staple: true` **and** a name match | not listed | collapsed, one tap to add anyway |
-| **Check** | name match, not a staple | not listed | shows the pantry row verbatim; *Have enough* / *Add to list* |
+| **Check** | name match, not a staple, not fresh | not listed | shows the pantry row verbatim; *Have enough* / *Add to list* |
 | Missing | no name match | listed, pre-checked | shows the recipe's own amount as the note |
 
 **No computed deficits, no unit conversion, no "you need 0.5 more cups."** A
@@ -206,7 +234,7 @@ near it. This is the hard part of the feature; de-risk it before adding a model.
 **Goal:** the "markdown skills for the agent" idea, made concrete before the
 planner needs it. These are **prompt fragments kept in the repo and loaded at
 request time** — standing household context the model gets every time, editable
-by hand in git, with no UI to build.
+by hand in git, no UI to build.
 
 ```
 skills/household.md     two adults; what "for 2" means; weeknight time budget
@@ -365,13 +393,12 @@ favorites" pool until you've eaten it. It's a git-tracked file — a bad one is 
 **Effort is both AI and human, human wins.** The field is `effort: 1-5`, because
 that's the question actually asked ("something easy tonight") and minutes don't
 answer it — a 3-hour braise is 20 minutes of work; a risotto is 25 minutes of
-standing at the stove. `active_minutes` and `total_minutes` come along as optional
-objective extras since recipe sources usually state them. Leave `effort` blank on
-save and it's inferred from the method body with a **haiku** call — this one *is*
+standing at the stove. `active_minutes` / `total_minutes` come along as optional
+objective extras since sources usually state them. Leave `effort` blank on save
+and it's inferred from the method body with a **haiku** call — this one *is*
 transcription-shaped — writing `effort_inferred: true`. The UI renders "(est.)",
-reusing the exact pattern `inventory.html` already uses for
-`effective_expiry_estimated`. Any human edit clears the flag and the AI never
-touches it again.
+reusing the pattern `inventory.html` already uses for
+`effective_expiry_estimated`. Any human edit clears the flag for good.
 
 1. `meal_planner.infer_effort(name, body, client=None)` — haiku, small schema,
    injectable client.

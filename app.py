@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 from datetime import date
 
@@ -31,8 +32,11 @@ import db
 import export_csv
 import expiry
 import matching
+import recipe_loader
+import recipe_writer
 import sections
 from catalog_store import CatalogStore
+from recipe_store import RecipeStore
 
 
 # How many unsorted items the bulk section-assignment form offers at once.
@@ -85,6 +89,15 @@ def create_app():
     app.catalog = CatalogStore(content_dir)
     app.catalog.reload()
 
+    # Recipes live in their own tree, NOT under content_dir: load_catalog turns
+    # every subdirectory there into a catalog category, so recipes would show
+    # up as a nav tab and inside the insurance report and CSV.
+    recipes_dir = os.environ.get(
+        "HOMEHQ_RECIPES_DIR", os.path.join(repo_dir, "recipes")
+    )
+    app.recipes = RecipeStore(recipes_dir)
+    app.recipes.reload()
+
     def get_db():
         if "db_conn" not in g:
             g.db_conn = db.get_connection(db_path)
@@ -110,6 +123,17 @@ def create_app():
     @app.template_filter("titlecase")
     def titlecase_filter(value):
         return value.replace("_", " ").replace("-", " ").title()
+
+    @app.template_filter("paragraphs")
+    def paragraphs_filter(text):
+        """Split on blank lines; collapse hard wraps inside a paragraph.
+
+        Recipes get pasted in wrapped at 80 characters, so rendering newlines
+        literally breaks sentences mid-line. This is what markdown itself
+        does with the same input.
+        """
+        blocks = re.split(r"\n\s*\n", (text or "").strip())
+        return [" ".join(block.split()) for block in blocks if block.strip()]
 
     @app.context_processor
     def inject_nav():
@@ -374,6 +398,110 @@ def create_app():
 
         return render_template("import_upload.html", error=None)
 
+    _INGREDIENT_HELP = (
+        "One per line: name | quantity | unit | flags. "
+        "Flags are 'fresh' and/or 'staple', comma-separated. "
+        "Only the name is required."
+    )
+
+    def _parse_ingredient_lines(text):
+        """Parse the textarea format into ingredient dicts.
+
+        A plain-text box beats a dynamic add-a-row widget here: it pastes,
+        it dictates, and it is trivially editable.
+        """
+        ingredients = []
+        for line in (text or "").splitlines():
+            if not line.strip():
+                continue
+            parts = [part.strip() for part in line.split("|")]
+            flags = parts[3].lower() if len(parts) > 3 else ""
+            ingredients.append(
+                recipe_loader.normalize_ingredient(
+                    {
+                        "name": parts[0],
+                        "quantity": parts[1] if len(parts) > 1 and parts[1] else None,
+                        "unit": parts[2] if len(parts) > 2 and parts[2] else None,
+                        "fresh": "fresh" in flags,
+                        "staple": "staple" in flags,
+                    }
+                )
+            )
+        return ingredients
+
+    @app.route("/recipes")
+    @login_required
+    def recipes():
+        kind = request.args.get("kind") or None
+        max_effort = request.args.get("max_effort")
+        matches = app.recipes.filter(
+            kind=kind,
+            cuisine=request.args.get("cuisine") or None,
+            max_effort=int(max_effort) if max_effort else None,
+            favorites_only=request.args.get("favorites") == "on",
+        )
+        groups = {}
+        for recipe in matches:
+            groups.setdefault(recipe.kind, []).append(recipe)
+        return render_template(
+            "recipes.html",
+            groups=[{"kind": k, "recipes": groups[k]} for k in sorted(groups)],
+            kinds=app.recipes.kinds(),
+            cuisines=app.recipes.cuisines(),
+            selected_kind=kind,
+            total=len(app.recipes.all()),
+            active="recipes",
+        )
+
+    @app.route("/recipes/new", methods=["GET", "POST"])
+    @login_required
+    def recipe_new():
+        if request.method == "POST":
+            name = request.form.get("name", "").strip()
+            if not name:
+                return render_template(
+                    "recipe_form.html",
+                    error="Give the recipe a name.",
+                    form=request.form,
+                    ingredient_help=_INGREDIENT_HELP,
+                    active="recipes",
+                )
+
+            effort = request.form.get("effort", "").strip()
+            frontmatter = {
+                "kind": request.form.get("kind") or "meal",
+                "cuisine": request.form.get("cuisine", "").strip() or None,
+                "favorite": request.form.get("favorite") == "on",
+                "effort": int(effort) if effort else None,
+                "serves": int(request.form["serves"]) if request.form.get("serves") else None,
+                "added": date.today().isoformat(),
+            }
+            recipe_writer.write_recipe(
+                recipes_dir,
+                name=name,
+                frontmatter=frontmatter,
+                ingredients=_parse_ingredient_lines(request.form.get("ingredients")),
+                body=request.form.get("body", ""),
+            )
+            app.recipes.reload()
+            return redirect(url_for("recipes"))
+
+        return render_template(
+            "recipe_form.html",
+            error=None,
+            form={},
+            ingredient_help=_INGREDIENT_HELP,
+            active="recipes",
+        )
+
+    @app.route("/recipes/<slug>")
+    @login_required
+    def recipe_detail(slug):
+        recipe = app.recipes.get(slug)
+        if recipe is None:
+            abort(404)
+        return render_template("recipe_detail.html", recipe=recipe, active="recipes")
+
     @app.route("/capture", methods=["GET", "POST"])
     @login_required
     def capture():
@@ -586,6 +714,7 @@ def create_app():
     @login_required
     def reload_catalog():
         app.catalog.reload()
+        app.recipes.reload()
         return redirect(url_for("pantry"))
 
     return app

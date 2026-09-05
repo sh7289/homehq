@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Add a recipe – Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="top-actions">
+      <h1 class="card__title">Add a Recipe</h1>
+      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
+    </div>
+    <hr class="card__rule">
+
+    {% if error %}
+      <p class="form-error">{{ error }}</p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('recipe_new') }}">
+      <div class="form-row">
+        <div class="field">
+          <label for="name">Name</label>
+          <input id="name" type="text" name="name" value="{{ form.name or '' }}" required>
+        </div>
+        <div class="field">
+          <label for="kind">Kind</label>
+          <select id="kind" name="kind">
+            {% for kind in ('meal', 'baked', 'sauce', 'side', 'breakfast') %}
+              <option value="{{ kind }}" {{ 'selected' if form.kind == kind else '' }}>{{ kind|titlecase }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="cuisine">Cuisine</label>
+          <input id="cuisine" type="text" name="cuisine" value="{{ form.cuisine or '' }}" placeholder="mexican">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="field">
+          <label for="effort">Effort (1&ndash;5)</label>
+          <input id="effort" type="number" min="1" max="5" name="effort" value="{{ form.effort or '' }}">
+        </div>
+        <div class="field">
+          <label for="serves">Serves</label>
+          <input id="serves" type="number" min="1" name="serves" value="{{ form.serves or '' }}">
+        </div>
+        <div class="field">
+          <label for="favorite">Favorite</label>
+          <select id="favorite" name="favorite">
+            <option value="on" {{ 'selected' if form.favorite else '' }}>Yes — we vouch for this</option>
+            <option value="" {{ '' if form.favorite else 'selected' }}>Not yet</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="ingredients">Ingredients</label>
+        <textarea id="ingredients" name="ingredients" rows="7"
+                  placeholder="chicken thighs | 1.5 | lb | fresh&#10;chipotle chili powder | 2 | tsp | staple&#10;corn tortillas | 12 | count">{{ form.ingredients or '' }}</textarea>
+        <span class="field__help">{{ ingredient_help }}</span>
+      </div>
+
+      <div class="field">
+        <label for="body">Method</label>
+        <textarea id="body" name="body" rows="8" placeholder="Char the chilies, then simmer.">{{ form.body or '' }}</textarea>
+      </div>
+
+      <button class="btn btn--primary" type="submit">Save recipe</button>
+    </form>
+
+    <span class="eyebrow">Why the flags matter</span>
+    <ul class="rows">
+      <li class="row"><strong>fresh</strong> — produce, dairy, fresh meat. Always added to the shopping list, because the pantry doesn't track fresh goods and "we have it" isn't the same as "it's still good".</li>
+      <li class="row"><strong>staple</strong> — spices and cupboard basics you always have. Keeps meal plans from asking about cumin every time.</li>
+    </ul>
+  </div>
+{% endblock %}

@@ -493,6 +493,68 @@ button:focus-visible {
   background: rgba(201, 138, 44, 0.08);
 }
 
+/* ---------- recipes ---------- */
+
+.tag-fav,
+.tag-fresh,
+.tag-staple {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.tag-fav {
+  color: var(--rust);
+  border: 1px solid var(--rust);
+  background: rgba(166, 64, 43, 0.08);
+}
+
+/* Fresh always goes on the list -- flagged in the accent that reads as
+   "action needed", not as a warning. */
+.tag-fresh {
+  color: var(--teal);
+  border: 1px solid var(--teal);
+  background: rgba(47, 110, 98, 0.08);
+}
+
+.tag-staple {
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  background: transparent;
+}
+
+.recipe-body {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  margin: 0 0 1.8rem;
+  padding: 0.9rem 1rem;
+  background: var(--paper-dim);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.recipe-body__para {
+  margin: 0 0 0.8rem;
+}
+
+.recipe-body__para:last-child {
+  margin-bottom: 0;
+}
+
+.field__help {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
 /* ---------- item list rows ---------- */
 
 .rows {
