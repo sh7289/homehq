@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 def get_connection(db_path):
@@ -77,11 +77,73 @@ def init_db(conn):
         conn.execute("ALTER TABLE import_staging_items ADD COLUMN estimated_value TEXT")
     if "section" not in staging_columns:
         conn.execute("ALTER TABLE import_staging_items ADD COLUMN section TEXT")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            identifier TEXT PRIMARY KEY,
+            failures INTEGER NOT NULL DEFAULT 0,
+            locked_until TEXT,
+            updated_at TEXT
+        )
+        """
+    )
     conn.commit()
+
+
+# Login throttling. Five wrong tries is well clear of ordinary fat-fingering
+# for a two-person household, and the backoff doubles from there so a script
+# gets slower far faster than a person does.
+LOCKOUT_THRESHOLD = 5
+LOCKOUT_BASE_SECONDS = 60
+LOCKOUT_MAX_SECONDS = 15 * 60
 
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def record_login_failure(conn, identifier, now=None):
+    """Count one failed attempt against an identifier and extend its lockout."""
+    now = now or datetime.now(timezone.utc)
+    with conn:
+        row = conn.execute(
+            "SELECT failures FROM login_attempts WHERE identifier = ?", (identifier,)
+        ).fetchone()
+        failures = (row["failures"] if row else 0) + 1
+
+        over = failures - LOCKOUT_THRESHOLD
+        if over >= 0:
+            seconds = min(LOCKOUT_BASE_SECONDS * (2**over), LOCKOUT_MAX_SECONDS)
+            locked_until = (now + timedelta(seconds=seconds)).isoformat()
+        else:
+            locked_until = None
+
+        conn.execute(
+            "INSERT INTO login_attempts (identifier, failures, locked_until, updated_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(identifier) DO UPDATE SET "
+            "failures = excluded.failures, locked_until = excluded.locked_until, "
+            "updated_at = excluded.updated_at",
+            (identifier, failures, locked_until, now.isoformat()),
+        )
+
+
+def lockout_remaining(conn, identifier, now=None):
+    """Seconds until this identifier may try again; 0 if it may try now."""
+    now = now or datetime.now(timezone.utc)
+    row = conn.execute(
+        "SELECT locked_until FROM login_attempts WHERE identifier = ?", (identifier,)
+    ).fetchone()
+    if row is None or not row["locked_until"]:
+        return 0
+    remaining = (datetime.fromisoformat(row["locked_until"]) - now).total_seconds()
+    return int(remaining) if remaining > 0 else 0
+
+
+def clear_login_failures(conn, identifier):
+    with conn:
+        conn.execute("DELETE FROM login_attempts WHERE identifier = ?", (identifier,))
 
 
 def add_item(

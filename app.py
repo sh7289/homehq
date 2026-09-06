@@ -1,7 +1,7 @@
 import os
 import re
 import uuid
-from datetime import date
+from datetime import date, timedelta
 
 import bcrypt
 from flask import (
@@ -13,6 +13,7 @@ from flask import (
     render_template,
     request,
     send_from_directory,
+    session,
     url_for,
 )
 from flask_login import (
@@ -74,6 +75,9 @@ def create_app():
     # this Flask accepts an unbounded upload; keeping the two in step means a
     # rejection is explainable rather than a bare nginx 413.
     app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+    # Without this a login cookie never expires server-side, so a stolen one
+    # is good forever.
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=14)
 
     behind_tls_proxy = os.environ.get("HOMEHQ_BEHIND_TLS_PROXY", "").lower() == "true"
     app.config["SESSION_COOKIE_SECURE"] = behind_tls_proxy
@@ -117,7 +121,11 @@ def create_app():
 
     login_manager = LoginManager()
     login_manager.login_view = "login"
+    # "strong" ties the session to the client's identity and drops it when
+    # that changes, which limits what a lifted cookie is worth.
+    login_manager.session_protection = "strong"
     login_manager.init_app(app)
+    app.login_manager = login_manager
 
     @login_manager.user_loader
     def load_user(username):
@@ -173,10 +181,44 @@ def create_app():
         if request.method == "POST":
             username = request.form.get("username", "")
             password = request.form.get("password", "").encode("utf-8")
+
+            # Throttle per username, deliberately NOT per source address:
+            # both household users share a home IP, so an address-based
+            # lockout would mean one person's typos lock the other out. With
+            # only two valid usernames there is nothing to enumerate, so
+            # per-username throttling is what actually protects the password.
+            identifier = f"user:{username}"
+            conn = get_db()
+            wait = db.lockout_remaining(conn, identifier)
+            if wait:
+                app.logger.warning(
+                    "Login blocked by lockout for %r from %s", username, request.remote_addr
+                )
+                return (
+                    render_template(
+                        "login.html",
+                        error=(
+                            "Too many failed attempts. Try again in "
+                            f"{wait // 60 + 1} minute(s)."
+                        ),
+                    ),
+                    429,
+                )
+
             password_hash = users.get(username)
             if password_hash and bcrypt.checkpw(password, password_hash.encode("utf-8")):
+                db.clear_login_failures(conn, identifier)
+                # Opt into PERMANENT_SESSION_LIFETIME; without this the cookie
+                # is a session cookie with no server-side expiry at all.
+                session.permanent = True
                 login_user(User(username))
                 return redirect(url_for("home"))
+
+            db.record_login_failure(conn, identifier)
+            # Never log the submitted password.
+            app.logger.warning(
+                "Failed login for %r from %s", username, request.remote_addr
+            )
             return render_template("login.html", error="Invalid username or password"), 401
         return render_template("login.html", error=None)
 
