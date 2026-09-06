@@ -27,5 +27,22 @@
       </div>
       <button class="btn btn--sm" type="submit">Upload</button>
     </form>
+
+    <span class="eyebrow">Danger</span>
+    <button class="btn btn--sm btn--ghost js-edit-toggle" type="button" data-target="delete-{{ item.slug }}">
+      Delete this item
+    </button>
+    <div class="edit-panel" id="delete-{{ item.slug }}" hidden>
+      <p class="form-error">
+        This permanently deletes <strong>{{ item.name }}</strong> and
+        {{ item.photos|length }} photo{{ '' if item.photos|length == 1 else 's' }}
+        from your insurance record. The removal is committed to git, so an old
+        version stays recoverable there — but not from this app.
+      </p>
+      <form method="post" action="{{ url_for('catalog_delete', category=item.category, slug=item.slug) }}">
+        <button class="btn btn--sm" type="submit">Yes, delete it</button>
+        <button class="btn btn--sm btn--ghost js-edit-toggle" type="button" data-target="delete-{{ item.slug }}">Cancel</button>
+      </form>
+    </div>
   </div>
 {% endblock %}

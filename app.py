@@ -907,6 +907,35 @@ def create_app():
             abort(404)
         return render_template("catalog_detail.html", item=item, active=category)
 
+    @app.route("/catalog/<category>/<slug>/delete", methods=["POST"])
+    @login_required
+    def catalog_delete(category, slug):
+        item = app.catalog.get(category, slug)
+        if item is None:
+            abort(404)
+
+        try:
+            catalog_writer.delete_catalog_item(
+                content_dir, photos_dir, category, slug, photos=item.photos
+            )
+        except (ValueError, FileNotFoundError):
+            abort(404)
+
+        app.catalog.reload()
+
+        github_token = os.environ.get("HOMEHQ_GITHUB_TOKEN")
+        if github_token:
+            try:
+                catalog_writer.git_commit_and_push(
+                    repo_dir, f"Remove catalog item: {item.name}", github_token
+                )
+            except catalog_writer.PushFailed as exc:
+                # The file is gone locally either way; a failed push must not
+                # make the deletion look like it failed.
+                app.logger.warning("Catalog push failed after delete: %s", exc)
+
+        return redirect(url_for("catalog_list", category=category))
+
     @app.route("/catalog/<category>/<slug>/add-photo", methods=["POST"])
     @login_required
     def catalog_add_photo(category, slug):

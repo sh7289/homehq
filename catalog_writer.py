@@ -98,6 +98,49 @@ def _make_askpass_script(token):
     return path
 
 
+def _within(root, candidate):
+    """Resolve candidate and confirm it stays under root."""
+    root = os.path.realpath(root)
+    resolved = os.path.realpath(candidate)
+    if resolved != root and not resolved.startswith(root + os.sep):
+        raise ValueError(f"path escapes {root}: {candidate}")
+    return resolved
+
+
+def delete_catalog_item(content_dir, photos_dir, category, slug, photos=()):
+    """Remove a catalog item's markdown file and its photos.
+
+    Both the slug and the photo paths reach here from user input or from a
+    file the AI wrote, so each resolved path is checked against its root
+    before anything is unlinked.
+
+    Returns the paths removed.
+    """
+    category_dir = _within(content_dir, os.path.join(content_dir, category))
+    md_path = os.path.realpath(os.path.join(category_dir, f"{slug}.md"))
+    # Staying under content/ is not enough: a slug like "../valuables/x" would
+    # delete from a different category than the URL claims.
+    if os.path.dirname(md_path) != category_dir:
+        raise ValueError(f"slug escapes its category directory: {slug}")
+    if not os.path.isfile(md_path):
+        raise FileNotFoundError(md_path)
+
+    # Validate every photo path before deleting anything, so a bad one can't
+    # leave the item half-removed.
+    photo_paths = [
+        _within(photos_dir, os.path.join(photos_dir, str(photo))) for photo in photos or []
+    ]
+
+    removed = []
+    for path in photo_paths:
+        if os.path.isfile(path):
+            os.remove(path)
+            removed.append(path)
+    os.remove(md_path)
+    removed.append(md_path)
+    return removed
+
+
 class PushFailed(Exception):
     """The commit succeeded but the push did not.
 
