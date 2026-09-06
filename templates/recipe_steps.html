@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Steps – {{ recipe.name }}{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="top-actions">
+      <h1 class="card__title">{{ recipe.name }}</h1>
+      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
+    </div>
+    <hr class="card__rule">
+    <p class="card__meta">Steps</p>
+
+    {% if error %}
+      <p class="form-error">{{ error }}</p>
+    {% endif %}
+
+    {% if suggested %}
+      <p class="form-note">
+        Drafted from your notes — nothing is saved yet. It fills in ordinary
+        technique your notes leave out, so read it before saving.
+      </p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('recipe_steps_edit', slug=recipe.slug) }}">
+      <div class="field">
+        <label for="steps">One step per line</label>
+        <textarea id="steps" name="steps" rows="10"
+                  placeholder="s1 | season and sear | chicken thighs&#10;s2 | simmer 45 min | s1, tomatoes&#10;s3 | serve in tortillas | s2, tortillas">{{ lines }}</textarea>
+        <span class="field__help">
+          <code>id | action | inputs</code>. Each input is either an ingredient
+          name exactly as written in the ingredient list, or the id of an
+          earlier step. The last step is the finished dish.
+        </span>
+      </div>
+      <button class="btn btn--primary" type="submit">Save steps</button>
+    </form>
+
+    <form method="post" action="{{ url_for('recipe_suggest_steps', slug=recipe.slug) }}">
+      <button class="btn" type="submit">
+        {% if recipe.steps %}Re-draft from notes{% else %}Draft from notes{% endif %}
+      </button>
+    </form>
+
+    <span class="eyebrow">Ingredients it can use</span>
+    <ul class="rows">
+      {% for ingredient in recipe.ingredients %}
+        <li class="row"><span class="row__name">{{ ingredient.name }}</span></li>
+      {% else %}
+        <li class="row">
+          None recorded —
+          <a href="{{ url_for('recipe_ingredients', slug=recipe.slug) }}">add ingredients first</a>,
+          otherwise the steps have nothing to refer to.
+        </li>
+      {% endfor %}
+    </ul>
+
+    <a class="btn btn--ghost" href="{{ url_for('recipe_detail', slug=recipe.slug) }}">Back to recipe</a>
+  </div>
+{% endblock %}

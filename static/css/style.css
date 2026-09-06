@@ -236,6 +236,12 @@ textarea {
   margin-bottom: 0.3rem;
 }
 
+/* An eyebrow following anything else needs air -- inline-block buttons above
+   it otherwise sit right on top of the label. */
+* + .eyebrow {
+  margin-top: 1.5rem;
+}
+
 /* ---------- home page index ---------- */
 
 .index-grid {
@@ -546,6 +552,71 @@ button:focus-visible {
 
 .recipe-body__para:last-child {
   margin-bottom: 0;
+}
+
+/* Cooking For Engineers table: ingredients down the left, operations
+   spanning the rows they consume. Scrolls sideways rather than squashing
+   on a phone. */
+.cfe-wrap {
+  overflow-x: auto;
+  margin: 0 0 1.4rem;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cfe {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 30rem;
+  font-size: 0.85rem;
+}
+
+.cfe th,
+.cfe td {
+  border: 1px solid var(--line);
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.cfe th {
+  font-weight: 500;
+  background: var(--paper-dim);
+  white-space: nowrap;
+}
+
+.cfe__amount {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+}
+
+.cfe td {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+/* Structural filler where no operation happens in that column yet. */
+.cfe__gap {
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 5px,
+    rgba(43, 36, 32, 0.04) 5px,
+    rgba(43, 36, 32, 0.04) 10px
+  );
+  border-color: transparent !important;
+}
+
+.method {
+  margin: 0 0 1.6rem;
+  padding-left: 1.3rem;
+  line-height: 1.6;
+}
+
+.method li {
+  margin-bottom: 0.45rem;
 }
 
 .scale-bar {

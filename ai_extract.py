@@ -143,6 +143,40 @@ Notes:
 """
 
 
+_STEPS_PROMPT = """Turn this recipe into a dependency graph of cooking steps.
+
+Respond with ONLY a JSON object (no prose, no markdown fences):
+
+{{"kind": "steps", "items": [
+  {{"id": "s1", "action": "season and sear", "inputs": ["chicken thighs"]}},
+  {{"id": "s2", "action": "simmer 45 min", "inputs": ["s1", "tomatoes"]}},
+  {{"id": "s3", "action": "serve in tortillas", "inputs": ["s2", "tortillas"]}}
+]}}
+
+- Each "inputs" entry is EITHER an ingredient name, spelled exactly as it
+  appears in the ingredient list below, OR the id of an earlier step.
+- Ids must be unique and a step may only reference steps defined before it.
+  Never create a cycle.
+- The last step is the finished dish. Work toward a single final step.
+- "action" is a short imperative phrase with any timing or temperature that
+  matters: "simmer 45 min", "bake at 200C for 25 min", "rest 10 min". Keep it
+  under about eight words.
+- Every ingredient in the list should be consumed by some step.
+- Aim for 3-8 steps. Combine trivial actions rather than making a step per
+  ingredient.
+- Fill in ordinary technique the notes leave out, but stay recognisably the
+  same dish. Do not add ingredients that are not in the list.
+
+Recipe: {name}
+
+Ingredients:
+{ingredients}
+
+Notes from the cook:
+{notes}
+"""
+
+
 class ExtractionError(Exception):
     pass
 
@@ -273,6 +307,44 @@ def extract_ingredients(name, text, api_key=None, model=None, client=None):
         ],
     )
     return parse_ingredients_response(message.content[0].text)
+
+
+def parse_steps_response(response_text):
+    """Parse a steps reply into normalized step dicts."""
+    try:
+        data = json.loads(_strip_code_fence(response_text))
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ExtractionError(f"Model response was not valid JSON: {exc}") from exc
+
+    if not isinstance(data, dict) or "items" not in data:
+        raise ExtractionError("Response did not contain an 'items' list")
+    return recipe_loader.normalize_steps(data.get("items"))
+
+
+def extract_steps(name, ingredients, notes, api_key=None, model=None, client=None):
+    """Propose a cooking-step graph for a recipe."""
+    if client is None:
+        client = anthropic.Anthropic(api_key=api_key or os.environ["HOMEHQ_ANTHROPIC_API_KEY"])
+
+    listed = "\n".join(f"- {i.get('name')}" for i in ingredients or []) or "- (none recorded)"
+    message = client.messages.create(
+        model=model or DEFAULT_MODEL,
+        max_tokens=2048,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": _STEPS_PROMPT.format(
+                            name=name, ingredients=listed, notes=notes or "(none)"
+                        ),
+                    }
+                ],
+            }
+        ],
+    )
+    return parse_steps_response(message.content[0].text)
 
 
 def extract_from_text(text, api_key=None, model=None, client=None):

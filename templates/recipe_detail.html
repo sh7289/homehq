@@ -60,8 +60,53 @@
       {% if recipe.ingredients %}Edit ingredients{% else %}Add ingredients{% endif %}
     </a>
 
-    {% if recipe.body %}
+    {% if recipe.steps %}
+      <span class="eyebrow">
+        Method
+        <a href="{{ url_for('recipe_detail', slug=recipe.slug, serves=shown_serves if scaled else None) }}">list</a> /
+        <a href="{{ url_for('recipe_detail', slug=recipe.slug, view='table', serves=shown_serves if scaled else None) }}">table</a>
+      </span>
+
+      {% if view == 'table' and table %}
+        {# Cooking For Engineers layout: ingredients down the left, each
+           operation spanning the rows of everything it consumes. #}
+        <div class="cfe-wrap">
+          <table class="cfe">
+            {% for row in table.rows %}
+              <tr>
+                <th scope="row">
+                  {{ row.ingredient.name }}
+                  {%- set amount = [] -%}
+                  {%- if row.ingredient.quantity %}{{- amount.append(row.ingredient.quantity) or '' -}}{% endif -%}
+                  {%- if row.ingredient.unit %}{{- amount.append(row.ingredient.unit) or '' -}}{% endif -%}
+                  {% if amount %}<span class="cfe__amount">{{ amount|join(' ') }}</span>{% endif %}
+                </th>
+                {% for cell in row.cells %}
+                  <td rowspan="{{ cell.rowspan }}" class="{{ 'cfe__gap' if cell.spacer else '' }}">{{ cell.action }}</td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </table>
+        </div>
+      {% else %}
+        <ol class="method">
+          {% for line in method %}
+            <li>{{ line.split('. ', 1)[1] if '. ' in line else line }}</li>
+          {% endfor %}
+        </ol>
+      {% endif %}
+
+      <a class="btn btn--sm" href="{{ url_for('recipe_steps_edit', slug=recipe.slug) }}">Edit steps</a>
+    {% else %}
       <span class="eyebrow">Method</span>
+      <p class="card__meta">
+        No steps recorded.
+        <a href="{{ url_for('recipe_steps_edit', slug=recipe.slug) }}">Write them, or have them drafted from your notes.</a>
+      </p>
+    {% endif %}
+
+    {% if recipe.body %}
+      <span class="eyebrow">Notes</span>
       <div class="recipe-body">
         {% for para in recipe.body|paragraphs %}
           <p class="recipe-body__para">{{ para }}</p>

@@ -284,3 +284,111 @@ def test_scaling_offers_choices_only_when_serves_is_known(client, app):
 
     assert b"Scale to" in client.get("/recipes/serves-two").data
     assert b"Scale to" not in client.get("/recipes/noserves").data
+
+
+STEPPED = """---
+name: Stepped
+kind: meal
+serves: 2
+ingredients:
+  - {name: chicken thighs, quantity: 1, unit: lb}
+  - {name: tomatoes, quantity: 2, unit: count}
+steps:
+  - {id: s1, action: sear the chicken, inputs: [chicken thighs]}
+  - {id: s2, action: simmer 45 min, inputs: [s1, tomatoes]}
+---
+Notes here.
+"""
+
+
+def test_detail_shows_a_numbered_method_from_steps(client, app):
+    _write_recipe(app, "stepped.md", STEPPED)
+    _login(client)
+
+    body = client.get("/recipes/stepped").data.decode()
+
+    assert "sear the chicken" in body
+    assert "<ol class=\"method\">" in body
+
+
+def test_table_view_renders_spanning_cells(client, app):
+    _write_recipe(app, "stepped.md", STEPPED)
+    _login(client)
+
+    body = client.get("/recipes/stepped?view=table").data.decode()
+
+    assert 'class="cfe"' in body
+    assert 'rowspan="2"' in body, "the simmer step spans both ingredient rows"
+
+
+def test_table_view_keeps_the_scaled_amounts(client, app):
+    _write_recipe(app, "stepped.md", STEPPED)
+    _login(client)
+
+    body = client.get("/recipes/stepped?view=table&serves=4").data.decode()
+
+    assert "2 lb" in body
+
+
+def test_a_recipe_without_steps_offers_to_draft_them(client, app):
+    _write_recipe(app, "tinga.md", TINGA)
+    _login(client)
+
+    body = client.get("/recipes/tinga").data.decode()
+
+    assert "No steps recorded" in body
+
+
+def test_step_editor_prefills_and_saves(client, app):
+    _write_recipe(app, "stepped.md", STEPPED)
+    _login(client)
+
+    body = client.get("/recipes/stepped/steps").data.decode()
+    assert "s1 | sear the chicken | chicken thighs" in body
+
+    response = client.post(
+        "/recipes/stepped/steps",
+        data={"steps": "s1 | brown it | chicken thighs\ns2 | stew | s1, tomatoes"},
+    )
+
+    assert response.status_code == 302
+    assert app.recipes.get("stepped").steps[0]["action"] == "brown it"
+
+
+def test_suggest_steps_does_not_save(client, app, monkeypatch):
+    import ai_extract
+
+    _write_recipe(app, "stepped.md", STEPPED)
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_steps",
+        lambda name, ingredients, notes, api_key=None: [
+            {"id": "s1", "action": "invented step", "inputs": ["chicken thighs"]}
+        ],
+    )
+    _login(client)
+
+    body = client.post("/recipes/stepped/suggest-steps").data.decode()
+
+    assert "invented step" in body
+    assert app.recipes.get("stepped").steps[0]["action"] == "sear the chicken"
+
+
+def test_suggest_steps_passes_ingredients_to_the_model(client, app, monkeypatch):
+    import ai_extract
+
+    seen = {}
+
+    def fake(name, ingredients, notes, api_key=None):
+        seen["names"] = [i["name"] for i in ingredients]
+        seen["notes"] = notes
+        return []
+
+    _write_recipe(app, "stepped.md", STEPPED)
+    monkeypatch.setattr(ai_extract, "extract_steps", fake)
+    _login(client)
+
+    client.post("/recipes/stepped/suggest-steps")
+
+    assert "chicken thighs" in seen["names"]
+    assert "Notes here." in seen["notes"]

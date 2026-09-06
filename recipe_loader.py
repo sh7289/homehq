@@ -33,6 +33,7 @@ class Recipe:
     name: str
     frontmatter: dict = field(default_factory=dict)
     ingredients: list = field(default_factory=list)
+    steps: list = field(default_factory=list)
     body: str = ""
 
     @property
@@ -90,6 +91,33 @@ def normalize_ingredient(raw):
     }
 
 
+def normalize_step(raw):
+    """A step is {id, action, inputs}. Model output, so validate it."""
+    if not isinstance(raw, dict):
+        raise ValueError(f"step is not a mapping: {raw!r}")
+    step_id = raw.get("id")
+    if not step_id:
+        raise ValueError("step is missing an id")
+    inputs = raw.get("inputs") or []
+    if not isinstance(inputs, list):
+        raise ValueError("step inputs must be a list")
+    return {
+        "id": str(step_id),
+        "action": str(raw.get("action") or ""),
+        "inputs": [str(i) for i in inputs if i],
+    }
+
+
+def normalize_steps(raw_steps):
+    steps = []
+    for raw in raw_steps or []:
+        try:
+            steps.append(normalize_step(raw))
+        except (ValueError, TypeError) as exc:
+            logger.warning("Skipping step: %s", exc)
+    return steps
+
+
 def _parse_file(path):
     text = open(path, encoding="utf-8").read()
     if not text.startswith(_FRONTMATTER_DELIM):
@@ -110,7 +138,8 @@ def _parse_file(path):
     ingredients = [
         normalize_ingredient(raw) for raw in (frontmatter.pop("ingredients", None) or [])
     ]
-    return str(name), frontmatter, ingredients, body.strip()
+    steps = normalize_steps(frontmatter.pop("steps", None))
+    return str(name), frontmatter, ingredients, steps, body.strip()
 
 
 def load_recipes(recipes_dir):
@@ -131,7 +160,7 @@ def load_recipes(recipes_dir):
             continue
 
         try:
-            name, frontmatter, ingredients, body = _parse_file(path)
+            name, frontmatter, ingredients, steps, body = _parse_file(path)
         except Exception as exc:
             logger.warning("Skipping %s: %s", path, exc)
             continue
@@ -143,6 +172,7 @@ def load_recipes(recipes_dir):
                 name=name,
                 frontmatter=frontmatter,
                 ingredients=ingredients,
+                steps=steps,
                 body=body,
             )
         )

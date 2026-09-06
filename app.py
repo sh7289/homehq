@@ -36,6 +36,7 @@ import expiry
 import matching
 import recipe_loader
 import recipe_scale
+import recipe_steps
 import recipe_writer
 import sections
 from catalog_store import CatalogStore
@@ -608,6 +609,83 @@ def create_app():
             recipe, recipe_writer.ingredients_to_lines(recipe.ingredients)
         )
 
+    def _steps_to_lines(steps):
+        """Render steps as `id | action | input, input` for the editor."""
+        return "\n".join(
+            f"{s['id']} | {s['action']} | {', '.join(s['inputs'])}" for s in steps or []
+        )
+
+    def _parse_step_lines(text):
+        steps = []
+        for index, line in enumerate((text or "").splitlines(), start=1):
+            if not line.strip():
+                continue
+            parts = [p.strip() for p in line.split("|")]
+            steps.append(
+                {
+                    "id": parts[0] or f"s{index}",
+                    "action": parts[1] if len(parts) > 1 else "",
+                    "inputs": [
+                        i.strip()
+                        for i in (parts[2].split(",") if len(parts) > 2 else [])
+                        if i.strip()
+                    ],
+                }
+            )
+        return recipe_loader.normalize_steps(steps)
+
+    def _render_step_editor(recipe, lines, error=None, suggested=False):
+        return render_template(
+            "recipe_steps.html",
+            recipe=recipe,
+            lines=lines,
+            error=error,
+            suggested=suggested,
+            active="recipes",
+        )
+
+    @app.route("/recipes/<slug>/steps", methods=["GET", "POST"])
+    @login_required
+    def recipe_steps_edit(slug):
+        recipe = app.recipes.get(slug)
+        if recipe is None:
+            abort(404)
+
+        if request.method == "POST":
+            recipe_writer.set_steps(
+                recipes_dir, slug, _parse_step_lines(request.form.get("steps"))
+            )
+            app.recipes.reload()
+            return redirect(url_for("recipe_detail", slug=slug))
+
+        return _render_step_editor(recipe, _steps_to_lines(recipe.steps))
+
+    @app.route("/recipes/<slug>/suggest-steps", methods=["POST"])
+    @login_required
+    def recipe_suggest_steps(slug):
+        recipe = app.recipes.get(slug)
+        if recipe is None:
+            abort(404)
+
+        current = _steps_to_lines(recipe.steps)
+        try:
+            api_key = os.environ["HOMEHQ_ANTHROPIC_API_KEY"]
+        except KeyError:
+            return _render_step_editor(
+                recipe,
+                current,
+                error="AI generation isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY.",
+            )
+
+        try:
+            proposed = ai_extract.extract_steps(
+                recipe.name, recipe.ingredients, recipe.body, api_key=api_key
+            )
+        except ai_extract.ExtractionError as exc:
+            return _render_step_editor(recipe, current, error=str(exc))
+
+        return _render_step_editor(recipe, _steps_to_lines(proposed), suggested=True)
+
     @app.route("/recipes/<slug>/suggest-ingredients", methods=["POST"])
     @login_required
     def recipe_suggest_ingredients(slug):
@@ -660,10 +738,16 @@ def create_app():
         shown_serves = (
             int(float(target)) if factor != 1 and target else base_serves
         )
+        view = request.args.get("view")
         return render_template(
             "recipe_detail.html",
             recipe=recipe,
             ingredients=ingredients,
+            view=view,
+            table=recipe_steps.build_table(ingredients, recipe.steps)
+            if view == "table"
+            else None,
+            method=recipe_steps.method_lines(ingredients, recipe.steps),
             base_serves=base_serves,
             shown_serves=shown_serves,
             scaled=factor != 1,

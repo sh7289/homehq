@@ -12,11 +12,13 @@ import recipe_loader
 from catalog_writer import _unique_path, slugify
 
 
-def _write(path, name, frontmatter, ingredients, body):
+def _write(path, name, frontmatter, ingredients, body, steps=None):
     document = {"name": name}
     document.update({k: v for k, v in (frontmatter or {}).items() if v not in (None, "")})
     if ingredients:
         document["ingredients"] = ingredients
+    if steps:
+        document["steps"] = steps
 
     with open(path, "w", encoding="utf-8") as f:
         f.write("---\n")
@@ -55,7 +57,30 @@ def set_ingredients(recipes_dir, slug, ingredients):
     if recipe is None:
         raise FileNotFoundError(path)
 
-    return _write(path, recipe.name, recipe.frontmatter, ingredients, recipe.body)
+    return _write(
+        path, recipe.name, recipe.frontmatter, ingredients, recipe.body, recipe.steps
+    )
+
+
+def set_steps(recipes_dir, slug, steps):
+    """Replace one recipe's step graph in place, leaving all else untouched."""
+    path = os.path.join(recipes_dir, f"{slug}.md")
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+
+    recipes = {r.slug: r for r in recipe_loader.load_recipes(recipes_dir)}
+    recipe = recipes.get(slug)
+    if recipe is None:
+        raise FileNotFoundError(path)
+
+    return _write(
+        path,
+        recipe.name,
+        recipe.frontmatter,
+        recipe.ingredients,
+        recipe.body,
+        recipe_loader.normalize_steps(steps),
+    )
 
 
 def ingredients_to_lines(ingredients):

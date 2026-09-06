@@ -181,3 +181,71 @@ def test_write_recipe_does_not_overwrite_an_existing_slug(tmp_path):
 
     assert first != second
     assert len(recipe_loader.load_recipes(str(tmp_path))) == 2
+
+
+WITH_STEPS = """---
+name: Tinga
+kind: meal
+ingredients:
+  - {name: chicken thighs, quantity: 1.5, unit: lb}
+steps:
+  - {id: s1, action: sear, inputs: [chicken thighs]}
+  - {id: s2, action: simmer, inputs: [s1]}
+---
+Body.
+"""
+
+
+def test_steps_are_loaded(tmp_path):
+    _write(tmp_path, "tinga.md", WITH_STEPS)
+
+    recipe = recipe_loader.load_recipes(str(tmp_path))[0]
+
+    assert [s["id"] for s in recipe.steps] == ["s1", "s2"]
+    assert recipe.steps[0]["action"] == "sear"
+    assert recipe.steps[0]["inputs"] == ["chicken thighs"]
+
+
+def test_steps_default_to_empty(tmp_path):
+    _write(tmp_path, "tinga.md", TINGA)
+
+    assert recipe_loader.load_recipes(str(tmp_path))[0].steps == []
+
+
+def test_a_step_without_an_id_is_dropped(tmp_path):
+    _write(
+        tmp_path,
+        "bad.md",
+        "---\nname: Bad\nkind: meal\nsteps:\n  - {action: stir, inputs: []}\n---\nb\n",
+    )
+
+    assert recipe_loader.load_recipes(str(tmp_path))[0].steps == []
+
+
+def test_steps_are_not_left_in_the_frontmatter_dict(tmp_path):
+    _write(tmp_path, "tinga.md", WITH_STEPS)
+
+    recipe = recipe_loader.load_recipes(str(tmp_path))[0]
+
+    assert "steps" not in recipe.frontmatter
+
+
+def test_set_steps_preserves_everything_else(tmp_path):
+    recipe_writer.write_recipe(
+        str(tmp_path),
+        name="Tinga",
+        frontmatter={"kind": "meal", "favorite": True, "serves": 2},
+        ingredients=[{"name": "chicken thighs", "quantity": 1.5, "unit": "lb"}],
+        body="Original notes.",
+    )
+
+    recipe_writer.set_steps(
+        str(tmp_path), "tinga", [{"id": "s1", "action": "sear", "inputs": ["chicken thighs"]}]
+    )
+
+    recipe = recipe_loader.load_recipes(str(tmp_path))[0]
+    assert recipe.steps[0]["action"] == "sear"
+    assert recipe.ingredients[0]["quantity"] == 1.5
+    assert recipe.frontmatter["serves"] == 2
+    assert recipe.is_favorite is True
+    assert recipe.body == "Original notes."
