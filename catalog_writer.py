@@ -98,16 +98,61 @@ def _make_askpass_script(token):
     return path
 
 
+class PushFailed(Exception):
+    """The commit succeeded but the push did not.
+
+    Raised separately from other failures so callers can tell "your item was
+    saved but hasn't reached GitHub" apart from "your item was not saved".
+    """
+
+
+_SSH_ORIGIN_RE = re.compile(
+    r"^(?:ssh://)?git@(?P<host>[^:/]+)[:/](?P<path>.+?)(?:\.git)?/?$"
+)
+
+
+def push_url_for(origin_url):
+    """Return an HTTPS push URL for a remote, whatever form it's configured in.
+
+    The server's `origin` is an SSH remote backed by a read-only deploy key.
+    GIT_ASKPASS only supplies HTTPS credentials, so pushing to `origin` there
+    silently ignores the write-scoped token and is rejected. Push to the
+    explicit HTTPS URL instead.
+    """
+    origin_url = (origin_url or "").strip()
+    match = _SSH_ORIGIN_RE.match(origin_url)
+    if match:
+        return f"https://{match.group('host')}/{match.group('path')}.git"
+    return origin_url
+
+
+def _origin_url(repo_dir, runner):
+    result = runner(
+        ["git", "remote", "get-url", "origin"],
+        cwd=repo_dir,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return getattr(result, "stdout", "") or ""
+
+
 def git_commit_and_push(repo_dir, message, github_token, branch="main", runner=subprocess.run):
-    """Stage everything, commit, and push using a write-scoped token.
+    """Stage the catalog, commit, and push using a write-scoped token.
 
     The token is passed via GIT_ASKPASS (a short-lived helper script) rather
     than embedded in argv or the remote URL, so it doesn't leak through the
     process list or get written into .git/config.
+
+    Raises PushFailed if the commit lands but the push doesn't.
     """
-    runner(["git", "add", "-A"], cwd=repo_dir, check=True)
+    # Stage only the catalog, never the whole repo: this runs in the app
+    # directory, so `git add -A` would sweep up anything untracked sitting
+    # there and publish it to GitHub.
+    runner(["git", "add", "--", "content", "photos"], cwd=repo_dir, check=True)
     runner(["git", "commit", "-m", message], cwd=repo_dir, check=True)
 
+    push_url = push_url_for(_origin_url(repo_dir, runner))
     askpass_path = _make_askpass_script(github_token)
     try:
         env = dict(os.environ)
@@ -118,12 +163,17 @@ def git_commit_and_push(repo_dir, message, github_token, branch="main", runner=s
                 "-c",
                 "credential.username=x-access-token",
                 "push",
-                "origin",
+                push_url,
                 f"HEAD:{branch}",
             ],
             cwd=repo_dir,
             check=True,
             env=env,
         )
+    except subprocess.CalledProcessError as exc:
+        raise PushFailed(
+            "Committed locally, but the push to GitHub failed. The item is "
+            "saved on the server and will go up with the next successful push."
+        ) from exc
     finally:
         os.remove(askpass_path)

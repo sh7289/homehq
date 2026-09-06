@@ -309,3 +309,76 @@ def test_reject_deletes_staging_item(client):
 
     assert response.status_code == 302
     assert _staging_items() == []
+
+
+def test_approve_clears_staging_even_when_the_push_fails(client, monkeypatch, app):
+    """The bug that stranded the Ukulele: the file was written and committed,
+    the push raised, and the staging row was never cleared -- so the item sat
+    in /import forever and re-approving would write a duplicate file."""
+    import catalog_writer
+
+    import ai_extract
+
+    monkeypatch.setenv("HOMEHQ_GITHUB_TOKEN", "fake-token")
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: [
+            {"target_type": "catalog", "name": "Ukulele", "category": "musical-instruments"}
+        ],
+    )
+
+    def failing_push(*args, **kwargs):
+        raise catalog_writer.PushFailed("Committed locally, but the push failed.")
+
+    monkeypatch.setattr(catalog_writer, "git_commit_and_push", failing_push)
+
+    _login(client)
+    client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"fake"), "uke.jpg")},
+        content_type="multipart/form-data",
+    )
+    staged_id = _staging_items()[0]["id"]
+
+    response = client.post(f"/import/{staged_id}/approve", data={})
+
+    assert response.status_code == 302
+    assert _staging_items() == [], "staging row should be cleared"
+    assert os.path.exists(
+        os.path.join(
+            os.environ["HOMEHQ_CONTENT_DIR"], "musical-instruments", "ukulele.md"
+        )
+    )
+
+
+def test_review_page_warns_when_a_push_failed(client, monkeypatch, app):
+    import catalog_writer
+
+    import ai_extract
+
+    monkeypatch.setenv("HOMEHQ_GITHUB_TOKEN", "fake-token")
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: [
+            {"target_type": "catalog", "name": "Ukulele", "category": "musical-instruments"}
+        ],
+    )
+    monkeypatch.setattr(
+        catalog_writer,
+        "git_commit_and_push",
+        lambda *a, **k: (_ for _ in ()).throw(catalog_writer.PushFailed("nope")),
+    )
+
+    _login(client)
+    client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"fake"), "uke.jpg")},
+        content_type="multipart/form-data",
+    )
+    staged_id = _staging_items()[0]["id"]
+
+    response = client.post(f"/import/{staged_id}/approve", data={}, follow_redirects=True)
+
+    assert b"saved on the server" in response.data or b"push" in response.data.lower()

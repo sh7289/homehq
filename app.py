@@ -372,6 +372,7 @@ def create_app():
                 "pantry": sections.sections_for("pantry"),
                 "freezer": sections.sections_for("freezer"),
             },
+            push_failed=request.args.get("push_failed"),
             active="import",
         )
 
@@ -622,6 +623,8 @@ def create_app():
         if staging_item is None:
             abort(404)
 
+        push_failed = False
+
         def field(name):
             return request.form.get(name) or staging_item.get(name)
 
@@ -667,12 +670,19 @@ def create_app():
             app.catalog.reload()
             github_token = os.environ.get("HOMEHQ_GITHUB_TOKEN")
             if github_token:
-                catalog_writer.git_commit_and_push(
-                    repo_dir, f"Add catalog item: {field('name')}", github_token
-                )
+                try:
+                    catalog_writer.git_commit_and_push(
+                        repo_dir, f"Add catalog item: {field('name')}", github_token
+                    )
+                except catalog_writer.PushFailed as exc:
+                    # The file is written and committed locally. Failing the
+                    # whole approve here would strand the staging row, and
+                    # re-approving would write a duplicate file.
+                    app.logger.warning("Catalog push failed: %s", exc)
+                    push_failed = True
 
         db.delete_staging_item(get_db(), item_id)
-        return redirect(url_for("import_review"))
+        return redirect(url_for("import_review", push_failed=1 if push_failed else None))
 
     @app.route("/import/<int:item_id>/reject", methods=["POST"])
     @login_required

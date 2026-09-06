@@ -9,6 +9,15 @@
     <hr class="card__rule">
     <p class="card__meta">{{ items|length }} item{{ '' if items|length == 1 else 's' }} awaiting review</p>
 
+    {% if push_failed %}
+      <p class="form-error">
+        Item saved and committed on the server, but the push to GitHub failed —
+        so it is <strong>not backed up off this machine yet</strong>. It will go
+        up with the next successful push. Check
+        <code>journalctl -u homehq</code> for the reason.
+      </p>
+    {% endif %}
+
     <ul class="rows">
       {% for item in items %}
         {% set suggestion = suggestions.get(item.id) %}
