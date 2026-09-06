@@ -34,12 +34,27 @@ class RecipeStore:
             {recipe.cuisine for recipe in self._by_slug.values() if recipe.cuisine}
         )
 
-    def filter(self, kind=None, cuisine=None, max_effort=None, favorites_only=False):
+    def categories(self):
+        """The imported sheet fills `category` ("Mexican", "Chili / Soup");
+        `cuisine` is mostly empty, so this is the filter that earns its keep."""
+        return sorted(
+            {
+                recipe.frontmatter.get("category")
+                for recipe in self._by_slug.values()
+                if recipe.frontmatter.get("category")
+            }
+        )
+
+    def filter(
+        self, kind=None, cuisine=None, category=None, max_effort=None, favorites_only=False
+    ):
         results = self.all()
         if kind:
             results = [r for r in results if r.kind == kind]
         if cuisine:
             results = [r for r in results if r.cuisine == cuisine]
+        if category:
+            results = [r for r in results if r.frontmatter.get("category") == category]
         if max_effort is not None:
             # A recipe with no effort recorded is not excluded by an effort
             # filter -- absence of data isn't evidence of difficulty.

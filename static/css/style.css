@@ -267,6 +267,17 @@ textarea {
   box-shadow: 0 6px 14px -8px rgba(43, 36, 32, 0.4);
 }
 
+/* Categories with nothing in them recede, so the populated ones read first.
+   Still fully legible and clickable -- this is emphasis, not disabling. */
+.index-grid a.is-empty {
+  background: transparent;
+  border-style: dashed;
+}
+
+.index-grid a.is-empty .index-grid__name {
+  color: var(--ink-soft);
+}
+
 .index-grid__label {
   font-family: var(--font-mono);
   font-size: 0.68rem;
@@ -430,6 +441,8 @@ button:focus-visible {
 
 .search-bar {
   display: flex;
+  flex-wrap: wrap; /* the recipe filters are four controls wide on a phone */
+  align-items: center;
   gap: 0.5rem;
   margin-bottom: 1.5rem;
 }
@@ -439,6 +452,17 @@ button:focus-visible {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   padding: 0.5rem 0.7rem;
+  background: var(--paper-dim);
+  color: var(--ink);
+}
+
+.search-bar select {
+  flex: 1 1 8rem;
+  min-width: 0; /* without this a long option name refuses to shrink */
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.5rem;
   background: var(--paper-dim);
   color: var(--ink);
 }
@@ -502,6 +526,7 @@ button:focus-visible {
 /* ---------- recipes ---------- */
 
 .tag-fav,
+.tag-untried,
 .tag-fresh,
 .tag-staple {
   display: inline-flex;
@@ -520,6 +545,24 @@ button:focus-visible {
   color: var(--rust);
   border: 1px solid var(--rust);
   background: rgba(166, 64, 43, 0.08);
+}
+
+.tag-untried {
+  color: var(--amber);
+  border: 1px dashed var(--amber);
+  background: transparent;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  white-space: nowrap;
 }
 
 /* Fresh always goes on the list -- flagged in the accent that reads as

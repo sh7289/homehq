@@ -235,7 +235,11 @@ def create_app():
     def home():
         stats = catalog_stats.compute_stats(app.catalog.all_items())
         return render_template(
-            "home.html", categories=app.catalog.categories(), stats=stats, active="home"
+            "home.html",
+            categories=app.catalog.categories(),
+            stats=stats,
+            recipe_count=len(app.recipes.all()),
+            active="home",
         )
 
     def _render_inventory_page(storage):
@@ -518,11 +522,13 @@ def create_app():
     def recipes():
         kind = request.args.get("kind") or None
         max_effort = request.args.get("max_effort")
+        category = request.args.get("category") or None
+        favorites_only = request.args.get("favorites") == "on"
         matches = app.recipes.filter(
             kind=kind,
-            cuisine=request.args.get("cuisine") or None,
+            category=category,
             max_effort=int(max_effort) if max_effort else None,
-            favorites_only=request.args.get("favorites") == "on",
+            favorites_only=favorites_only,
         )
         groups = {}
         for recipe in matches:
@@ -531,8 +537,11 @@ def create_app():
             "recipes.html",
             groups=[{"kind": k, "recipes": groups[k]} for k in sorted(groups)],
             kinds=app.recipes.kinds(),
-            cuisines=app.recipes.cuisines(),
+            categories=app.recipes.categories(),
             selected_kind=kind,
+            selected_category=category,
+            selected_effort=max_effort,
+            favorites_only=favorites_only,
             total=len(app.recipes.all()),
             active="recipes",
         )

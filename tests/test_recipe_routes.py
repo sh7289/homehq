@@ -392,3 +392,60 @@ def test_suggest_steps_passes_ingredients_to_the_model(client, app, monkeypatch)
 
     assert "chicken thighs" in seen["names"]
     assert "Notes here." in seen["notes"]
+
+
+def test_listing_marks_untried_recipes_not_favorites(client, app):
+    """17 of 20 are favorites, so badging those is noise -- the informative
+    ones are the few nobody has vouched for yet."""
+    _write_recipe(app, "tinga.md", TINGA)          # favorite: true
+    _write_recipe(app, "scones.md", SCONES)        # no favorite key
+    _login(client)
+
+    body = client.get("/recipes").data.decode()
+
+    assert "Untried" in body
+    # Scoped to the row badges: "Favorites only" is a filter control.
+    assert 'class="tag-fav"' not in body
+
+
+def test_listing_offers_a_category_filter_built_from_the_data(client, app):
+    _write_recipe(
+        app, "chili.md",
+        "---\nname: Chili\nkind: meal\ncategory: Chili / Soup\n---\nSimmer.\n",
+    )
+    _login(client)
+
+    body = client.get("/recipes").data.decode()
+
+    assert "Chili / Soup" in body
+    assert 'name="category"' in body
+
+
+def test_category_filter_narrows_the_list(client, app):
+    _write_recipe(
+        app, "chili.md",
+        "---\nname: Chili\nkind: meal\ncategory: Chili / Soup\n---\nSimmer.\n",
+    )
+    _write_recipe(
+        app, "taco.md",
+        "---\nname: Taco\nkind: meal\ncategory: Mexican\n---\nFold.\n",
+    )
+    _login(client)
+
+    body = client.get("/recipes?category=Mexican").data.decode()
+
+    # Check the row links, not raw names -- "Chili / Soup" is also a filter option.
+    assert "/recipes/taco" in body
+    assert "/recipes/chili" not in body
+
+
+def test_favorites_only_toggle_is_offered_and_works(client, app):
+    _write_recipe(app, "tinga.md", TINGA)
+    _write_recipe(app, "scones.md", SCONES)
+    _login(client)
+
+    assert b'name="favorites"' in client.get("/recipes").data
+
+    body = client.get("/recipes?favorites=on").data.decode()
+    assert "Chicken Tinga Tacos" in body
+    assert "Buttermilk Scones" not in body

@@ -16,13 +16,24 @@
           <option value="{{ kind }}" {{ 'selected' if selected_kind == kind else '' }}>{{ kind|titlecase }}</option>
         {% endfor %}
       </select>
+      <select name="category" aria-label="Category">
+        <option value="">All categories</option>
+        {% for category in categories %}
+          <option value="{{ category }}" {{ 'selected' if selected_category == category else '' }}>{{ category }}</option>
+        {% endfor %}
+      </select>
       <select name="max_effort" aria-label="Maximum effort">
         <option value="">Any effort</option>
-        <option value="1">1 — trivial</option>
-        <option value="2">2 or less</option>
-        <option value="3">3 or less</option>
-        <option value="4">4 or less</option>
+        {% for n in [1, 2, 3, 4] %}
+          <option value="{{ n }}" {{ 'selected' if selected_effort == n|string else '' }}>
+            {{ 'effort 1 only' if n == 1 else n ~ ' or less' }}
+          </option>
+        {% endfor %}
       </select>
+      <label class="check">
+        <input type="checkbox" name="favorites" value="on" {{ 'checked' if favorites_only else '' }}>
+        Favorites only
+      </label>
       <button class="btn" type="submit">Filter</button>
     </form>
 
@@ -40,7 +51,9 @@
             {%- if recipe.effort %}{{- bits.append('effort ' ~ recipe.effort ~ '/5') or '' -}}{% endif -%}
             {%- if recipe.frontmatter.serves %}{{- bits.append('serves ' ~ recipe.frontmatter.serves) or '' -}}{% endif -%}
             <span class="row__meta">{{ bits|join(' · ') }}</span>
-            {% if recipe.is_favorite %}<span class="tag-fav">Favorite</span>{% endif %}
+            {# Most recipes here are vouched for, so badging those says
+               nothing. The few nobody has tried are the useful signal. #}
+            {% if not recipe.is_favorite %}<span class="tag-untried">Untried</span>{% endif %}
           </li>
         {% endfor %}
       </ul>
