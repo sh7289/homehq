@@ -35,6 +35,7 @@ import export_csv
 import expiry
 import matching
 import recipe_loader
+import recipe_scale
 import recipe_writer
 import sections
 from catalog_store import CatalogStore
@@ -646,7 +647,29 @@ def create_app():
         recipe = app.recipes.get(slug)
         if recipe is None:
             abort(404)
-        return render_template("recipe_detail.html", recipe=recipe, active="recipes")
+
+        base_serves = recipe.frontmatter.get("serves")
+        target = request.args.get("serves")
+        factor = recipe_scale.factor_for(base_serves, target)
+        # Scaling is a view concern: the stored file never changes.
+        ingredients = (
+            recipe_scale.scale(recipe.ingredients, factor)
+            if factor != 1
+            else recipe.ingredients
+        )
+        shown_serves = (
+            int(float(target)) if factor != 1 and target else base_serves
+        )
+        return render_template(
+            "recipe_detail.html",
+            recipe=recipe,
+            ingredients=ingredients,
+            base_serves=base_serves,
+            shown_serves=shown_serves,
+            scaled=factor != 1,
+            scale_choices=[1, 2, 4, 6, 8],
+            active="recipes",
+        )
 
     @app.route("/capture", methods=["GET", "POST"])
     @login_required

@@ -19,19 +19,33 @@
       {% if recipe.effort %} &middot; effort {{ recipe.effort }}/5{% endif %}
       {% if recipe.frontmatter.active_minutes %} &middot; {{ recipe.frontmatter.active_minutes }} min active{% endif %}
       {% if recipe.frontmatter.total_minutes %} &middot; {{ recipe.frontmatter.total_minutes }} min total{% endif %}
-      {% if recipe.frontmatter.serves %} &middot; serves {{ recipe.frontmatter.serves }}{% endif %}
+      {% if shown_serves %} &middot; serves {{ shown_serves }}{% endif %}
       {% if recipe.is_favorite %} &middot; favorite{% endif %}
     </p>
 
-    <span class="eyebrow">Ingredients</span>
+    <span class="eyebrow">
+      Ingredients
+      {% if scaled %}&middot; scaled from {{ base_serves }}{% endif %}
+    </span>
+
+    {% if base_serves %}
+      <p class="scale-bar">
+        Scale to:
+        {% for n in scale_choices %}
+          <a href="{{ url_for('recipe_detail', slug=recipe.slug, serves=n) }}"
+             class="{{ 'is-active' if shown_serves == n else '' }}">{{ n }}</a>
+        {% endfor %}
+      </p>
+    {% endif %}
+
     <ul class="rows">
-      {% for ingredient in recipe.ingredients %}
+      {% for ingredient in ingredients %}
         <li class="row">
           <span class="row__name">{{ ingredient.name }}</span>
-          <span class="row__meta">
-            {% if ingredient.quantity %}{{ ingredient.quantity }}{% endif %}
-            {{ ingredient.unit or '' }}
-          </span>
+          {%- set amount = [] -%}
+          {%- if ingredient.quantity %}{{- amount.append(ingredient.quantity) or '' -}}{% endif -%}
+          {%- if ingredient.unit %}{{- amount.append(ingredient.unit) or '' -}}{% endif -%}
+          <span class="row__meta">{{ amount|join(' ') }}</span>
           {% if ingredient.fresh %}
             <span class="tag-fresh" title="Always added to the shopping list — the pantry doesn't track fresh goods">Fresh</span>
           {% elif ingredient.staple %}

@@ -548,6 +548,31 @@ button:focus-visible {
   margin-bottom: 0;
 }
 
+.scale-bar {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 0 0 0.9rem;
+}
+
+.scale-bar a {
+  display: inline-block;
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.15rem 0.55rem;
+  margin-left: 0.3rem;
+  color: var(--ink);
+}
+
+.scale-bar a.is-active {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: var(--paper);
+}
+
 .form-note {
   font-family: var(--font-mono);
   font-size: 0.78rem;

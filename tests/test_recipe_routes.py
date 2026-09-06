@@ -226,3 +226,61 @@ def test_reload_refreshes_recipes_too(client, app):
     client.post("/reload")
 
     assert app.recipes.get("tinga") is not None
+
+
+SERVES_TWO = """---
+name: Serves Two
+kind: meal
+serves: 2
+ingredients:
+  - {name: beef, quantity: 1, unit: lb}
+  - {name: garlic, fresh: true}
+---
+Cook it.
+"""
+
+
+def test_detail_scales_quantities_to_the_requested_yield(client, app):
+    _write_recipe(app, "serves-two.md", SERVES_TWO)
+    _login(client)
+
+    body = client.get("/recipes/serves-two?serves=4").data.decode()
+
+    assert "2 lb" in body
+    assert "serves 4" in body.lower()
+
+
+def test_scaling_does_not_change_the_stored_recipe(client, app):
+    _write_recipe(app, "serves-two.md", SERVES_TWO)
+    _login(client)
+
+    client.get("/recipes/serves-two?serves=8")
+
+    assert app.recipes.get("serves-two").ingredients[0]["quantity"] == 1
+
+
+def test_unscaled_detail_shows_the_original_amounts(client, app):
+    _write_recipe(app, "serves-two.md", SERVES_TWO)
+    _login(client)
+
+    body = client.get("/recipes/serves-two").data.decode()
+
+    assert "1 lb" in body
+
+
+def test_a_bogus_serves_value_is_ignored(client, app):
+    _write_recipe(app, "serves-two.md", SERVES_TWO)
+    _login(client)
+
+    body = client.get("/recipes/serves-two?serves=nonsense").data.decode()
+
+    assert body.count("1 lb") >= 1
+
+
+def test_scaling_offers_choices_only_when_serves_is_known(client, app):
+    _write_recipe(app, "serves-two.md", SERVES_TWO)
+    _write_recipe(app, "noserves.md", "---\nname: No Serves\nkind: meal\n---\nCook.\n")
+    _login(client)
+
+    assert b"Scale to" in client.get("/recipes/serves-two").data
+    assert b"Scale to" not in client.get("/recipes/noserves").data
