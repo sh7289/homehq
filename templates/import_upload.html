@@ -8,10 +8,16 @@
 
     {% if error %}<p class="form-error">{{ error }}</p>{% endif %}
 
+    <p class="card__meta">
+      A receipt, a shelf or cupboard of food, or a single item worth
+      cataloguing. You can pick several photos at once — 10 MB total, so a few
+      at a time.
+    </p>
+
     <form method="post" action="{{ url_for('import_upload') }}" enctype="multipart/form-data">
       <div class="field">
-        <label for="photo">Photo</label>
-        <input id="photo" type="file" name="photo" accept="image/*" required>
+        <label for="photo">Photos</label>
+        <input id="photo" type="file" name="photo" accept="image/*" multiple required>
       </div>
       <button class="btn btn--primary" type="submit">Upload &amp; extract</button>
     </form>

@@ -70,6 +70,10 @@ def create_app():
     app.config["SECRET_KEY"] = os.environ["SECRET_KEY"]
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    # Matches `client_max_body_size 10M` in deploy/nginx-homehq.conf. Without
+    # this Flask accepts an unbounded upload; keeping the two in step means a
+    # rejection is explainable rather than a bare nginx 413.
+    app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
     behind_tls_proxy = os.environ.get("HOMEHQ_BEHIND_TLS_PROXY", "").lower() == "true"
     app.config["SESSION_COOKIE_SECURE"] = behind_tls_proxy
@@ -152,6 +156,17 @@ def create_app():
         if current_user.is_authenticated:
             return {"nav_categories": app.catalog.categories()}
         return {"nav_categories": []}
+
+    @app.errorhandler(413)
+    def upload_too_large(error):
+        return (
+            render_template(
+                "import_upload.html",
+                error="Those photos are too large (10 MB total). Try fewer at a time.",
+                active="import",
+            ),
+            413,
+        )
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -380,14 +395,9 @@ def create_app():
     @login_required
     def import_upload():
         if request.method == "POST":
-            photo = request.files.get("photo")
-            if not photo or not photo.filename:
+            photos = [p for p in request.files.getlist("photo") if p and p.filename]
+            if not photos:
                 return render_template("import_upload.html", error="Choose a photo first.")
-
-            ext = os.path.splitext(photo.filename)[1] or ".jpg"
-            upload_path = os.path.join(uploads_dir, f"{uuid.uuid4().hex}{ext}")
-            photo.save(upload_path)
-            media_type = photo.mimetype or "image/jpeg"
 
             try:
                 api_key = os.environ["HOMEHQ_ANTHROPIC_API_KEY"]
@@ -397,16 +407,33 @@ def create_app():
                     error="AI import isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY.",
                 )
 
-            try:
-                with open(upload_path, "rb") as f:
-                    rows = ai_extract.extract_from_image(
-                        f.read(), media_type, api_key=api_key
-                    )
-            except ai_extract.ExtractionError as exc:
-                return render_template("import_upload.html", error=str(exc))
+            staged = 0
+            failures = []
+            for photo in photos:
+                ext = os.path.splitext(photo.filename)[1] or ".jpg"
+                upload_path = os.path.join(uploads_dir, f"{uuid.uuid4().hex}{ext}")
+                photo.save(upload_path)
 
-            for row in rows:
-                db.add_staging_item(get_db(), source_image_path=upload_path, **row)
+                try:
+                    with open(upload_path, "rb") as f:
+                        rows = ai_extract.extract_from_image(
+                            f.read(), photo.mimetype or "image/jpeg", api_key=api_key
+                        )
+                except ai_extract.ExtractionError as exc:
+                    # One unreadable shelf photo shouldn't discard the rest of
+                    # the batch -- record it and carry on.
+                    failures.append(f"{photo.filename}: {exc}")
+                    continue
+
+                for row in rows:
+                    db.add_staging_item(get_db(), source_image_path=upload_path, **row)
+                    staged += 1
+
+            if not staged:
+                return render_template(
+                    "import_upload.html",
+                    error="; ".join(failures) or "Nothing could be read from those photos.",
+                )
             return redirect(url_for("import_review"))
 
         return render_template("import_upload.html", error=None)

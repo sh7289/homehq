@@ -20,12 +20,13 @@ _VALID_CATEGORIES = (
     "valuables",
 )
 
-_PROMPT = """You are looking at a photo that is either (a) a store receipt, or
-(b) a single physical household item (a tool, kitchen item, appliance manual,
+_PROMPT = """You are looking at a photo that is one of: (a) a store receipt,
+(b) a shelf, cupboard or freezer drawer holding several food items, or
+(c) a single physical household item (a tool, kitchen item, appliance manual,
 or a valuable/collectible like a record, instrument, or electronics).
 
 Decide which one it is, then respond with ONLY a JSON object (no prose, no
-markdown fences) in one of these two exact shapes:
+markdown fences) in one of these exact shapes:
 
 Receipt:
 {"kind": "receipt", "items": [
@@ -34,6 +35,20 @@ Receipt:
 - "storage" must be "pantry" or "freezer" (guess based on the item -- frozen
   foods go to "freezer", everything else to "pantry").
 - Skip non-food line items (bags, tax, discounts).
+
+Shelf or cupboard of food:
+{"kind": "shelf", "items": [
+  {"name": "...", "quantity": null, "unit": null, "storage": "pantry",
+   "section": "canned"}
+]}
+- Use this when you can see several distinct food items stored together.
+- "quantity" is usually NOT knowable from a photo -- you cannot see how full
+  a jar is or how many tins are behind the front one. Use null unless you can
+  literally count the items. A wrong count is worse than a blank the human
+  fills in.
+- "section" must match the item's storage; see the section list below.
+- Name what you can identify; skip anything you cannot read or recognise
+  rather than guessing at a blurred label.
 
 Single item:
 {"kind": "catalog_item", "name": "...", "category": "kitchen", "brand": null,
@@ -59,6 +74,9 @@ Single item:
   null for everyday items or anything you're not reasonably confident about
   (a manual, a generic kitchen tool, an item you can't identify well
   enough to guess).
+
+Valid "section" values, matching the item's storage:
+{sections}
 """
 
 
@@ -149,7 +167,7 @@ def parse_extraction_response(response_text):
 
     kind = data.get("kind")
 
-    if kind in ("receipt", "pantry_items"):
+    if kind in ("receipt", "pantry_items", "shelf"):
         rows = []
         for raw_item in data.get("items", []):
             name = raw_item.get("name")
@@ -312,7 +330,12 @@ def extract_from_image(image_bytes, media_type, api_key=None, model=None, client
                             "data": base64.b64encode(image_bytes).decode("ascii"),
                         },
                     },
-                    {"type": "text", "text": _PROMPT},
+                    {
+                        "type": "text",
+                        # replace(), not format(): this prompt contains literal
+                        # JSON braces that format() would choke on.
+                        "text": _PROMPT.replace("{sections}", _section_prompt_lines()),
+                    },
                 ],
             }
         ],

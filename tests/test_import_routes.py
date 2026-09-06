@@ -382,3 +382,98 @@ def test_review_page_warns_when_a_push_failed(client, monkeypatch, app):
     response = client.post(f"/import/{staged_id}/approve", data={}, follow_redirects=True)
 
     assert b"saved on the server" in response.data or b"push" in response.data.lower()
+
+
+def test_upload_size_limit_is_configured(app):
+    """Flask had no limit at all; nginx caps the request at 10M in prod."""
+    assert app.config["MAX_CONTENT_LENGTH"] == 10 * 1024 * 1024
+
+
+def test_oversized_upload_gets_a_readable_message(client, app):
+    _login(client)
+
+    response = client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"x" * (11 * 1024 * 1024)), "huge.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 413
+    assert b"too large" in response.data.lower()
+
+
+def test_upload_stages_several_shelf_photos_in_one_batch(client, monkeypatch):
+    import ai_extract
+
+    seen = []
+
+    def fake_extract(image_bytes, media_type, api_key=None):
+        seen.append(image_bytes)
+        index = len(seen)
+        return [
+            {
+                "target_type": "inventory",
+                "name": f"item {index}",
+                "quantity": 1,
+                "unit": "can",
+                "storage": "pantry",
+                "section": "canned",
+            }
+        ]
+
+    monkeypatch.setattr(ai_extract, "extract_from_image", fake_extract)
+    _login(client)
+
+    response = client.post(
+        "/import/upload",
+        data={
+            "photo": [
+                (io.BytesIO(b"shelf-one"), "a.jpg"),
+                (io.BytesIO(b"shelf-two"), "b.jpg"),
+            ]
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 302
+    assert len(seen) == 2, "both photos should be sent to the model"
+    names = sorted(i["name"] for i in _staging_items())
+    assert names == ["item 1", "item 2"]
+
+
+def test_one_bad_photo_does_not_lose_the_others(client, monkeypatch):
+    """A batch of shelf photos shouldn't be all-or-nothing."""
+    import ai_extract
+
+    calls = []
+
+    def fake_extract(image_bytes, media_type, api_key=None):
+        calls.append(image_bytes)
+        if len(calls) == 1:
+            raise ai_extract.ExtractionError("could not read that one")
+        return [
+            {
+                "target_type": "inventory",
+                "name": "rice",
+                "quantity": 1,
+                "unit": "bag",
+                "storage": "pantry",
+                "section": "bulk-dry",
+            }
+        ]
+
+    monkeypatch.setattr(ai_extract, "extract_from_image", fake_extract)
+    _login(client)
+
+    client.post(
+        "/import/upload",
+        data={
+            "photo": [
+                (io.BytesIO(b"blurry"), "a.jpg"),
+                (io.BytesIO(b"good"), "b.jpg"),
+            ]
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert [i["name"] for i in _staging_items()] == ["rice"]
