@@ -49,6 +49,22 @@ from recipe_store import RecipeStore
 SECTION_SORTER_BATCH = 15
 
 
+def _batch_summary_message(staged_count, failed_count):
+    """Build the "N ready; M failed" line shown after an upload redirect.
+
+    Kept as a pure function (no db/request access) so the wording is easy to
+    reason about and test on its own.
+    """
+    parts = []
+    if staged_count:
+        parts.append(f"{staged_count} item{'' if staged_count == 1 else 's'} ready to review")
+    if failed_count:
+        parts.append(
+            f"{failed_count} photo{'' if failed_count == 1 else 's'} could not be read"
+        )
+    return "; ".join(parts) + "." if parts else None
+
+
 class User(UserMixin):
     def __init__(self, username):
         self.id = username
@@ -416,19 +432,38 @@ def create_app():
     @app.route("/import")
     @login_required
     def import_review():
-        pending = db.list_staging_items(get_db(), status="pending")
+        conn = get_db()
+        pending = db.list_staging_items(conn, status="pending")
+        failed = db.list_staging_items(conn, status="failed")
         suggestions = {}
         for staging_item in pending:
             if staging_item["target_type"] == "inventory":
                 candidates = db.list_items(
-                    get_db(), storage=staging_item.get("storage") or "pantry"
+                    conn, storage=staging_item.get("storage") or "pantry"
                 )
                 suggestions[staging_item["id"]] = matching.find_best_match(
                     staging_item["name"], candidates
                 )
+
+        # ?batch=<id> is set only on the redirect right after an upload (the
+        # same one-shot query-param pattern as push_failed below) -- it scopes
+        # the summary line to *that* request instead of every pending/failed
+        # row that happens to exist, and it's read from the database here
+        # rather than trusted from the query string, so the counts always
+        # reflect what actually got persisted.
+        batch_id = request.args.get("batch")
+        batch_summary = None
+        if batch_id:
+            batch_failed = [item for item in failed if item.get("batch_id") == batch_id]
+            staged_count = sum(1 for item in pending if item.get("batch_id") == batch_id)
+            message = _batch_summary_message(staged_count, len(batch_failed))
+            if message:
+                batch_summary = {"message": message, "had_failures": bool(batch_failed)}
+
         return render_template(
             "import_review.html",
             items=pending,
+            failed_items=failed,
             suggestions=suggestions,
             categories=app.catalog.categories(),
             section_choices={
@@ -436,6 +471,7 @@ def create_app():
                 "freezer": sections.sections_for("freezer"),
             },
             push_failed=request.args.get("push_failed"),
+            batch_summary=batch_summary,
             active="import",
         )
 
@@ -455,26 +491,47 @@ def create_app():
                     error="AI import isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY.",
                 )
 
+            # One id ties every row this request produces -- staged or
+            # failed -- together, so the review page can report on *this*
+            # upload specifically after the redirect (see import_review).
+            batch_id = uuid.uuid4().hex
             staged = 0
             failures = []
             for photo in photos:
                 ext = os.path.splitext(photo.filename)[1] or ".jpg"
                 upload_path = os.path.join(uploads_dir, f"{uuid.uuid4().hex}{ext}")
                 photo.save(upload_path)
+                media_type = photo.mimetype or "image/jpeg"
 
                 try:
                     with open(upload_path, "rb") as f:
                         rows = ai_extract.extract_from_image(
-                            f.read(), photo.mimetype or "image/jpeg", api_key=api_key
+                            f.read(), media_type, api_key=api_key
                         )
                 except ai_extract.ExtractionError as exc:
                     # One unreadable shelf photo shouldn't discard the rest of
-                    # the batch -- record it and carry on.
+                    # the batch -- record it and carry on. This is persisted
+                    # as a 'failed' staging row (not just kept in `failures`
+                    # for this request) so it survives the redirect and can
+                    # be retried without re-uploading -- the file is already
+                    # saved at upload_path.
                     failures.append(f"{photo.filename}: {exc}")
+                    db.add_staging_item(
+                        get_db(),
+                        target_type="failed",
+                        name=photo.filename,
+                        status="failed",
+                        error=str(exc),
+                        media_type=media_type,
+                        source_image_path=upload_path,
+                        batch_id=batch_id,
+                    )
                     continue
 
                 for row in rows:
-                    db.add_staging_item(get_db(), source_image_path=upload_path, **row)
+                    db.add_staging_item(
+                        get_db(), source_image_path=upload_path, batch_id=batch_id, **row
+                    )
                     staged += 1
 
             if not staged:
@@ -482,7 +539,7 @@ def create_app():
                     "import_upload.html",
                     error="; ".join(failures) or "Nothing could be read from those photos.",
                 )
-            return redirect(url_for("import_review"))
+            return redirect(url_for("import_review", batch=batch_id))
 
         return render_template("import_upload.html", error=None)
 
@@ -915,7 +972,9 @@ def create_app():
     @login_required
     def import_approve(item_id):
         staging_item = db.get_staging_item(get_db(), item_id)
-        if staging_item is None:
+        if staging_item is None or staging_item["target_type"] not in ("inventory", "catalog"):
+            # A 'failed' staging row (an unreadable photo, not an item) has
+            # no approve action -- only Retry/Discard on the review page.
             abort(404)
 
         push_failed = False
@@ -984,6 +1043,75 @@ def create_app():
     def import_reject(item_id):
         db.delete_staging_item(get_db(), item_id)
         return redirect(url_for("import_review"))
+
+    @app.route("/import/<int:item_id>/retry", methods=["POST"])
+    @login_required
+    def import_retry(item_id):
+        """Re-run extraction for one failed photo, without touching the rest
+        of the batch it came from.
+
+        The photo is already saved on disk (source_image_path), so this
+        never asks for a re-upload. The status flip to 'retrying' below is
+        the "server-side batch identity" guard: it claims the row before
+        doing any work, so a duplicate click (or a slow first request still
+        in flight) sees status != 'failed' and no-ops instead of staging the
+        same items twice.
+        """
+        conn = get_db()
+        failed_item = db.get_staging_item(conn, item_id)
+        if failed_item is None:
+            abort(404)
+        if failed_item["status"] != "failed":
+            return redirect(url_for("import_review"))
+        db.set_staging_item_status(conn, item_id, "retrying")
+
+        def _fail_again(message):
+            db.update_staging_item(conn, item_id, error=message)
+            db.set_staging_item_status(conn, item_id, "failed")
+            return redirect(url_for("import_review"))
+
+        try:
+            try:
+                api_key = os.environ["HOMEHQ_ANTHROPIC_API_KEY"]
+            except KeyError:
+                return _fail_again(
+                    "AI import isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY."
+                )
+
+            upload_path = failed_item.get("source_image_path")
+            if not upload_path or not os.path.exists(upload_path):
+                return _fail_again(
+                    "That photo is no longer available on the server -- upload it again."
+                )
+
+            media_type = failed_item.get("media_type") or "image/jpeg"
+            try:
+                with open(upload_path, "rb") as f:
+                    rows = ai_extract.extract_from_image(f.read(), media_type, api_key=api_key)
+            except ai_extract.ExtractionError as exc:
+                return _fail_again(str(exc))
+
+            if not rows:
+                return _fail_again("Still nothing readable in that photo.")
+
+            for row in rows:
+                db.add_staging_item(
+                    conn,
+                    source_image_path=upload_path,
+                    batch_id=failed_item.get("batch_id"),
+                    **row,
+                )
+            db.delete_staging_item(conn, item_id)
+            return redirect(url_for("import_review"))
+        except Exception:
+            # Whatever else went wrong (a bug, a raw network exception
+            # ai_extract didn't wrap), the row must not be left stranded in
+            # 'retrying' -- neither pending nor failed, invisible on the
+            # review page and unretryable. Restore the original failure
+            # message and let the 500 propagate like it would anywhere else
+            # in this app.
+            db.set_staging_item_status(conn, item_id, "failed")
+            raise
 
     @app.route("/report")
     @login_required

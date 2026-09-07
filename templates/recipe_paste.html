@@ -13,7 +13,7 @@
       <p class="form-error">{{ error }}</p>
     {% endif %}
 
-    <form method="post" action="{{ url_for('recipe_paste') }}">
+    <form method="post" action="{{ url_for('recipe_paste') }}" data-pending-message="Preparing recipe&hellip;">
       <div class="field">
         <label for="text">Recipe text</label>
         <textarea id="text" name="text" rows="14"
@@ -22,6 +22,7 @@
       <button class="btn btn--primary" type="submit">Read it</button>
       <a class="btn btn--ghost" href="{{ url_for('recipe_new') }}">Type it out instead</a>
     </form>
+    <p class="status-live" aria-live="polite" role="status"></p>
 
     <span class="eyebrow">What it does and doesn't do</span>
     <ul class="rows">

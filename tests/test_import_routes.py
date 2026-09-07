@@ -477,3 +477,323 @@ def test_one_bad_photo_does_not_lose_the_others(client, monkeypatch):
     )
 
     assert [i["name"] for i in _staging_items()] == ["rice"]
+
+
+def test_partial_batch_failure_carries_both_outcomes_to_review_page(client, monkeypatch):
+    """The bug this task fixes: redirecting to review used to drop the
+    failure message silently whenever at least one photo succeeded."""
+    import ai_extract
+
+    def fake_extract(image_bytes, media_type, api_key=None):
+        if image_bytes == b"blurry":
+            raise ai_extract.ExtractionError("could not read that one")
+        return [
+            {
+                "target_type": "inventory",
+                "name": "rice",
+                "quantity": 1,
+                "unit": "bag",
+                "storage": "pantry",
+            }
+        ]
+
+    monkeypatch.setattr(ai_extract, "extract_from_image", fake_extract)
+    _login(client)
+
+    response = client.post(
+        "/import/upload",
+        data={
+            "photo": [
+                (io.BytesIO(b"blurry"), "shelf-a.jpg"),
+                (io.BytesIO(b"good"), "shelf-b.jpg"),
+            ]
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    body = response.data.decode()
+    # Both outcomes are visible: the staged item, and the failure for the
+    # photo that could not be read, identified by name.
+    assert "rice" in body
+    assert "shelf-a.jpg" in body
+    assert "could not read that one" in body
+    assert "1 item ready to review" in body
+    assert "1 photo could not be read" in body
+
+    failed = _staging_items(status="failed")
+    assert len(failed) == 1
+    assert failed[0]["name"] == "shelf-a.jpg"
+    assert failed[0]["error"] == "could not read that one"
+    # Preserved: the successful item from the same batch is still there.
+    assert [i["name"] for i in _staging_items()] == ["rice"]
+
+
+def test_retry_of_failed_file_stages_it_without_touching_the_rest(client, monkeypatch):
+    import ai_extract
+
+    def fake_extract(image_bytes, media_type, api_key=None):
+        if image_bytes == b"blurry":
+            raise ai_extract.ExtractionError("could not read that one")
+        return [
+            {
+                "target_type": "inventory",
+                "name": "rice",
+                "quantity": 1,
+                "unit": "bag",
+                "storage": "pantry",
+            }
+        ]
+
+    monkeypatch.setattr(ai_extract, "extract_from_image", fake_extract)
+    _login(client)
+
+    client.post(
+        "/import/upload",
+        data={
+            "photo": [
+                (io.BytesIO(b"blurry"), "shelf-a.jpg"),
+                (io.BytesIO(b"good"), "shelf-b.jpg"),
+            ]
+        },
+        content_type="multipart/form-data",
+    )
+    failed_id = _staging_items(status="failed")[0]["id"]
+
+    # The retry now succeeds -- every call from here on returns the same row.
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: [
+            {
+                "target_type": "inventory",
+                "name": "beans",
+                "quantity": 1,
+                "unit": "can",
+                "storage": "pantry",
+            }
+        ],
+    )
+
+    response = client.post(f"/import/{failed_id}/retry", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert _staging_items(status="failed") == []
+    names = sorted(i["name"] for i in _staging_items())
+    # The originally-successful item ("rice") is untouched, and the retried
+    # photo is now staged too -- with no duplication of the batch's items.
+    assert names == ["beans", "rice"]
+
+
+def test_retrying_a_resolved_failure_is_a_404_not_a_restage(client, monkeypatch):
+    """Once a retry has resolved a failed row (staged it and deleted the
+    row), the id no longer refers to anything -- a second retry POST for the
+    same id (a slow double-submit landing after the first finished) must not
+    silently re-stage anything."""
+    import ai_extract
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: (_ for _ in ()).throw(
+            ai_extract.ExtractionError("nope")
+        ),
+    )
+    _login(client)
+
+    client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"blurry"), "shelf-a.jpg")},
+        content_type="multipart/form-data",
+    )
+    failed_id = _staging_items(status="failed")[0]["id"]
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: [
+            {"target_type": "inventory", "name": "beans", "quantity": 1, "storage": "pantry"}
+        ],
+    )
+
+    client.post(f"/import/{failed_id}/retry")
+    response = client.post(f"/import/{failed_id}/retry")
+
+    assert response.status_code == 404
+    assert [i["name"] for i in _staging_items()] == ["beans"]
+
+
+def test_retry_in_flight_guard_blocks_a_concurrent_duplicate(client, monkeypatch):
+    """Exercises the server-side guard directly: a row already claimed as
+    'retrying' (a first request still in flight) must not be re-processed by
+    a second request for the same id -- this is the "server-side batch
+    identity" the task asks for, not anything client-side."""
+    import ai_extract
+    import db
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: [
+            {"target_type": "inventory", "name": "beans", "quantity": 1, "storage": "pantry"}
+        ],
+    )
+    _login(client)
+
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    failed_id = db.add_staging_item(
+        conn,
+        target_type="failed",
+        name="shelf-a.jpg",
+        status="failed",
+        error="could not read that one",
+        source_image_path=os.path.join(os.environ["HOMEHQ_UPLOADS_DIR"], "shelf-a.jpg"),
+        media_type="image/jpeg",
+    )
+    with open(os.path.join(os.environ["HOMEHQ_UPLOADS_DIR"], "shelf-a.jpg"), "wb") as f:
+        f.write(b"fake")
+    # Simulate a first retry request already in flight, having claimed the
+    # row but not yet finished.
+    db.set_staging_item_status(conn, failed_id, "retrying")
+    conn.close()
+
+    response = client.post(f"/import/{failed_id}/retry", follow_redirects=True)
+
+    assert response.status_code == 200
+    # Nothing staged -- the in-flight guard made this a no-op rather than a
+    # second extraction pass.
+    assert _staging_items() == []
+
+
+def test_retry_unexpected_error_does_not_strand_the_row_in_retrying(client, monkeypatch):
+    """If extraction blows up with something other than ExtractionError (a
+    bug, an unwrapped network error), the row must come back to 'failed'
+    rather than being stuck invisibly in 'retrying' forever. TESTING=True
+    (set by the app fixture) makes Flask re-raise the exception instead of
+    turning it into a 500 response, so this exercises the same code path
+    production's own error handling would hit."""
+    import ai_extract
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: (_ for _ in ()).throw(
+            ai_extract.ExtractionError("nope")
+        ),
+    )
+    _login(client)
+    client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"blurry"), "shelf-a.jpg")},
+        content_type="multipart/form-data",
+    )
+    failed_id = _staging_items(status="failed")[0]["id"]
+
+    def boom(image_bytes, media_type, api_key=None):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(ai_extract, "extract_from_image", boom)
+
+    try:
+        client.post(f"/import/{failed_id}/retry")
+    except RuntimeError:
+        pass
+
+    failed = _staging_items(status="failed")
+    assert len(failed) == 1
+    assert failed[0]["id"] == failed_id
+    assert failed[0]["status"] == "failed"
+
+
+def test_retry_failure_leaves_the_row_retryable_again(client, monkeypatch):
+    import ai_extract
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: (_ for _ in ()).throw(
+            ai_extract.ExtractionError("still blurry")
+        ),
+    )
+    _login(client)
+
+    client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"blurry"), "shelf-a.jpg")},
+        content_type="multipart/form-data",
+    )
+    failed_id = _staging_items(status="failed")[0]["id"]
+
+    response = client.post(f"/import/{failed_id}/retry", follow_redirects=True)
+
+    assert response.status_code == 200
+    failed = _staging_items(status="failed")
+    assert len(failed) == 1
+    assert failed[0]["id"] == failed_id
+    assert failed[0]["error"] == "still blurry"
+    assert b"still blurry" in response.data
+
+
+def test_discard_removes_a_failed_photo_notice(client, monkeypatch):
+    import ai_extract
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: (_ for _ in ()).throw(
+            ai_extract.ExtractionError("nope")
+        ),
+    )
+    _login(client)
+
+    client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"blurry"), "shelf-a.jpg")},
+        content_type="multipart/form-data",
+    )
+    failed_id = _staging_items(status="failed")[0]["id"]
+
+    response = client.post(f"/import/{failed_id}/reject", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert _staging_items(status="failed") == []
+
+
+def test_import_upload_form_disables_submit_while_pending():
+    """Server-verifiable half of the pending-state requirement: the form
+    itself carries the pending-message hook and a polite live region for the
+    client-side JS to drive -- without JS, nothing here should assume the
+    request already completed."""
+    with open("templates/import_upload.html") as f:
+        html = f.read()
+
+    assert 'data-pending-message="Reading photos' in html
+    assert 'aria-live="polite"' in html
+    assert 'role="alert"' not in html
+
+
+def test_upload_page_error_render_has_no_batch_or_failed_rows(client, monkeypatch):
+    """The existing all-failed inline-error path is unchanged: it renders on
+    the upload page itself (no redirect), and the pending 'failed' rows it
+    records are not shown as staged/pending items."""
+    import ai_extract
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: (_ for _ in ()).throw(
+            ai_extract.ExtractionError("could not read image")
+        ),
+    )
+    _login(client)
+
+    response = client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"fake-jpeg-bytes"), "receipt.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    assert _staging_items() == []

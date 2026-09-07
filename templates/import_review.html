@@ -9,6 +9,34 @@
     <hr class="card__rule">
     <p class="card__meta">{{ items|length }} item{{ '' if items|length == 1 else 's' }} awaiting review</p>
 
+    {% if batch_summary %}
+      <p class="notice {{ 'notice--warning' if batch_summary.had_failures else 'notice--success' }}" aria-live="polite" role="status">
+        {{ batch_summary.message }}
+      </p>
+    {% endif %}
+
+    {% if failed_items %}
+      <div class="import-attention">
+        <p class="eyebrow">Needs attention</p>
+        <ul class="rows">
+          {% for item in failed_items %}
+            <li class="row">
+              <span class="row__name">{{ item.name }}</span>
+              <span class="row__meta">{{ item.error or "Could not be read." }}</span>
+              <span class="row__actions">
+                <form class="inline-form" method="post" action="{{ url_for('import_retry', item_id=item.id) }}" data-pending-message="Retrying&hellip;">
+                  <button class="btn btn--sm" type="submit">Retry</button>
+                </form>
+                <form class="inline-form" method="post" action="{{ url_for('import_reject', item_id=item.id) }}">
+                  <button class="btn btn--sm btn--ghost" type="submit">Discard</button>
+                </form>
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
     {% if push_failed %}
       <p class="form-error">
         Item saved and committed on the server, but the push to GitHub failed —

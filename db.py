@@ -77,6 +77,17 @@ def init_db(conn):
         conn.execute("ALTER TABLE import_staging_items ADD COLUMN estimated_value TEXT")
     if "section" not in staging_columns:
         conn.execute("ALTER TABLE import_staging_items ADD COLUMN section TEXT")
+    # batch_id ties every row (staged or failed) produced by one upload
+    # request together, so the review page can report "N ready; M failed"
+    # for *this* upload rather than for every pending/failed row ever.
+    # error/media_type only apply to status='failed' rows: the message from
+    # the failed extraction, and the media type needed to retry it.
+    if "batch_id" not in staging_columns:
+        conn.execute("ALTER TABLE import_staging_items ADD COLUMN batch_id TEXT")
+    if "error" not in staging_columns:
+        conn.execute("ALTER TABLE import_staging_items ADD COLUMN error TEXT")
+    if "media_type" not in staging_columns:
+        conn.execute("ALTER TABLE import_staging_items ADD COLUMN media_type TEXT")
 
     conn.execute(
         """
@@ -284,10 +295,13 @@ _STAGING_FIELDS = (
     "estimated_value",
     "source_image_path",
     "section",
+    "batch_id",
+    "error",
+    "media_type",
 )
 
 
-def add_staging_item(conn, target_type, name, **fields):
+def add_staging_item(conn, target_type, name, status="pending", **fields):
     values = {field: fields.get(field) for field in _STAGING_FIELDS}
     values["target_type"] = target_type
     values["name"] = name
@@ -296,7 +310,7 @@ def add_staging_item(conn, target_type, name, **fields):
     with conn:
         cursor = conn.execute(
             f"INSERT INTO import_staging_items ({', '.join(columns)}) VALUES ({placeholders})",
-            [*values.values(), "pending", _now()],
+            [*values.values(), status, _now()],
         )
         return cursor.lastrowid
 

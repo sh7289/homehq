@@ -703,6 +703,39 @@ summary:focus-visible {
   margin-bottom: 1.1rem;
 }
 
+/* A form's live pending/progress message (see base.html) -- reserves its
+   line height even empty, so the button row doesn't jump when text appears. */
+.status-live {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  margin: 0.6rem 0 0;
+  min-height: 1.2em;
+}
+
+/* Same shape as .form-error, using the success/warning status tokens --
+   for outcomes that aren't failures (or aren't only failures). */
+.notice {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 1.1rem;
+  border: 1px solid;
+}
+
+.notice--success {
+  color: var(--status-success-text);
+  background: rgba(47, 110, 98, 0.08);
+  border-color: var(--status-success);
+}
+
+.notice--warning {
+  color: var(--status-warning-text);
+  background: rgba(201, 138, 44, 0.08);
+  border-color: var(--status-warning);
+}
+
 /* ---------- buttons ---------- */
 
 .btn {
@@ -730,6 +763,14 @@ summary:focus-visible {
 
 .btn:active {
   transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  /* Also suppresses :hover's color-swap while disabled, since a disabled
+     button can still register :hover from the mouse sitting on it. */
+  pointer-events: none;
 }
 
 .btn--primary {
