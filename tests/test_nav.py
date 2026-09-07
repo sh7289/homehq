@@ -101,3 +101,18 @@ def test_mobile_inventory_group_exposes_pantry_and_freezer(client):
     assert "Inventory" in body
     assert 'href="/pantry"' in body
     assert 'href="/freezer"' in body
+
+
+def test_mobile_more_panel_carries_its_right_anchoring_modifier(client):
+    """The "More" disclosure is the rightmost of 5 bottom-bar slots, so its
+    popover needs the `--more` modifier (right-anchored in CSS) rather than
+    the default centered positioning the other disclosures use -- centering
+    it the same way runs it off the right edge of a phone viewport. This
+    only checks the markup is wired up; static/css/style.css:
+    `.nav-mobile__panel--more` carries the actual positioning fix, which is
+    verified visually/manually (see task report), not by pytest."""
+    _login(client)
+
+    body = client.get("/").data.decode()
+
+    assert 'class="nav-mobile__panel nav-mobile__panel--more"' in body

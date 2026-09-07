@@ -225,8 +225,11 @@ textarea {
   font-size: 0.68rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  /* Full-opacity --ink-soft against --surface-page computes to ~4.84:1.
+     The 0.75 opacity this used to carry blended it down to ~3:1 against
+     the new light page background -- dropped rather than re-tuned, since
+     --ink-soft alone already clears 4.5:1 with no extra math needed. */
   color: var(--ink-soft);
-  opacity: 0.75;
 }
 
 .account {
@@ -430,6 +433,17 @@ textarea {
   border-radius: var(--radius-sm);
   padding: 0.4rem;
   box-shadow: 0 -10px 24px -14px rgba(43, 36, 32, 0.35);
+}
+
+/* "More" is the rightmost of the 5 bottom-bar slots -- centering its
+   popover the same way the others do runs it off the right edge of the
+   viewport at phone widths (with overflow-x:clip on body, that overflow
+   is invisible AND unreachable, not just visually clipped). Anchor it to
+   the disclosure's right edge instead, so it only ever grows leftward. */
+.nav-mobile__panel--more {
+  left: auto;
+  right: 0;
+  transform: none;
 }
 
 .nav-mobile__panel a {
