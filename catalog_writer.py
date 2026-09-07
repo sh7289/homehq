@@ -193,7 +193,21 @@ def git_commit_and_push(repo_dir, message, github_token, branch="main", runner=s
     # directory, so `git add -A` would sweep up anything untracked sitting
     # there and publish it to GitHub.
     runner(["git", "add", "--", "content", "photos"], cwd=repo_dir, check=True)
-    runner(["git", "commit", "-m", message], cwd=repo_dir, check=True)
+    try:
+        runner(
+            ["git", "commit", "-m", message],
+            cwd=repo_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        # git exits non-zero when nothing is staged. That is a no-op here --
+        # the file was already committed -- not a failure worth surfacing.
+        output = f"{getattr(exc, 'stdout', '') or ''}{getattr(exc, 'stderr', '') or ''}"
+        if "nothing to commit" in output or "nothing added to commit" in output:
+            return
+        raise
 
     push_url = push_url_for(_origin_url(repo_dir, runner))
     askpass_path = _make_askpass_script(github_token)
@@ -212,11 +226,18 @@ def git_commit_and_push(repo_dir, message, github_token, branch="main", runner=s
             cwd=repo_dir,
             check=True,
             env=env,
+            capture_output=True,
+            text=True,
         )
     except subprocess.CalledProcessError as exc:
+        # Include git's own words: "push failed" on its own is undiagnosable,
+        # and the journal is the only place this is ever read. The token is
+        # never in the URL (GIT_ASKPASS supplies it), so stderr is safe to log.
+        detail = (getattr(exc, "stderr", "") or "").strip().replace("\n", " ")
         raise PushFailed(
             "Committed locally, but the push to GitHub failed. The item is "
-            "saved on the server and will go up with the next successful push."
+            "saved on the server and will go up with the next successful push. "
+            f"git said: {detail or 'no output'}"
         ) from exc
     finally:
         os.remove(askpass_path)

@@ -128,3 +128,50 @@ def test_push_failure_still_leaves_the_commit_in_place(tmp_path):
         pass
 
     assert ["git", "commit", "-m", "Add item"] in calls
+
+
+def test_push_failure_carries_gits_own_error(tmp_path):
+    """A generic 'push failed' tells you nothing. Surface git's stderr."""
+    import subprocess
+
+    from catalog_writer import PushFailed, git_commit_and_push
+
+    def fake_runner(cmd, **kwargs):
+        if cmd[:3] == ["git", "remote", "get-url"]:
+            return _FakeUrlResult("git@github.com:sh7289/homehq.git\n")
+        if "push" in cmd:
+            raise subprocess.CalledProcessError(
+                128, cmd, stderr="remote: Write access to repository not granted."
+            )
+        return _FakeUrlResult()
+
+    try:
+        git_commit_and_push(str(tmp_path), "Add item", github_token="t", runner=fake_runner)
+        raise AssertionError("expected PushFailed")
+    except PushFailed as exc:
+        assert "Write access to repository not granted" in str(exc)
+
+
+def test_nothing_to_commit_is_not_treated_as_a_failure(tmp_path):
+    """git exits non-zero when there is nothing staged; that is a no-op here,
+    not an error worth 500ing the approve over."""
+    import subprocess
+
+    from catalog_writer import git_commit_and_push
+
+    calls = []
+
+    def fake_runner(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:3] == ["git", "remote", "get-url"]:
+            return _FakeUrlResult("https://github.com/sh7289/homehq.git\n")
+        if cmd[:2] == ["git", "commit"]:
+            raise subprocess.CalledProcessError(
+                # CalledProcessError takes output=, not stdout= (which is an alias)
+                1, cmd, output="nothing to commit, working tree clean"
+            )
+        return _FakeUrlResult()
+
+    git_commit_and_push(str(tmp_path), "Add item", github_token="t", runner=fake_runner)
+
+    assert not any("push" in c for c in calls), "nothing committed, so nothing to push"
