@@ -39,3 +39,23 @@ def test_extract_from_image_sends_image_and_returns_parsed_rows():
     image_block = next(c for c in content if c["type"] == "image")
     assert image_block["source"]["media_type"] == "image/jpeg"
     assert image_block["source"]["data"]  # base64 payload present
+
+
+def test_a_malformed_api_key_is_rejected_with_a_clear_message():
+    """A key with a stray non-ASCII character (Option+S types 'ß' on a Mac)
+    otherwise surfaces as a UnicodeEncodeError inside an HTTP header."""
+    import pytest
+
+    import ai_extract
+
+    with pytest.raises(ai_extract.ExtractionError, match="position 7"):
+        ai_extract.extract_from_text("two cans of beans", api_key="sk-ant-ßxyz")
+
+
+def test_a_blank_api_key_is_rejected_clearly():
+    import pytest
+
+    import ai_extract
+
+    with pytest.raises(ai_extract.ExtractionError, match="not configured"):
+        ai_extract.extract_ingredients("Chili", "notes", api_key="")

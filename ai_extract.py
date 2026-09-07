@@ -181,6 +181,32 @@ class ExtractionError(Exception):
     pass
 
 
+def _build_client(api_key, client):
+    """Return the injected client, or construct one from a validated key.
+
+    The key ends up in an HTTP header, so a stray non-ASCII character (a Mac
+    types 'ß' for Option+S, which is easy to pick up mid-copy) surfaces as a
+    UnicodeEncodeError from deep inside the transport. Catch it here where we
+    can say which character and where.
+    """
+    if client is not None:
+        return client
+
+    key = api_key or os.environ.get("HOMEHQ_ANTHROPIC_API_KEY") or ""
+    if not key.strip():
+        raise ExtractionError(
+            "The Anthropic API key is not configured (HOMEHQ_ANTHROPIC_API_KEY)."
+        )
+    for index, char in enumerate(key):
+        if ord(char) > 127:
+            raise ExtractionError(
+                f"The Anthropic API key contains a non-ASCII character "
+                f"({char!r}) at position {index}, so it cannot be a valid key. "
+                "It was most likely mangled when copied -- copy it again."
+            )
+    return anthropic.Anthropic(api_key=key)
+
+
 def _strip_code_fence(text):
     text = text.strip()
     if text.startswith("```"):
@@ -288,8 +314,7 @@ def parse_ingredients_response(response_text):
 
 def extract_ingredients(name, text, api_key=None, model=None, client=None):
     """Propose structured ingredients from a recipe's freeform notes."""
-    if client is None:
-        client = anthropic.Anthropic(api_key=api_key or os.environ["HOMEHQ_ANTHROPIC_API_KEY"])
+    client = _build_client(api_key, client)
 
     message = client.messages.create(
         model=model or DEFAULT_MODEL,
@@ -323,8 +348,7 @@ def parse_steps_response(response_text):
 
 def extract_steps(name, ingredients, notes, api_key=None, model=None, client=None):
     """Propose a cooking-step graph for a recipe."""
-    if client is None:
-        client = anthropic.Anthropic(api_key=api_key or os.environ["HOMEHQ_ANTHROPIC_API_KEY"])
+    client = _build_client(api_key, client)
 
     listed = "\n".join(f"- {i.get('name')}" for i in ingredients or []) or "- (none recorded)"
     message = client.messages.create(
@@ -353,8 +377,7 @@ def extract_from_text(text, api_key=None, model=None, client=None):
     This is also the voice path: iOS keyboard dictation types into the same
     textarea, so no speech-to-text service is involved.
     """
-    if client is None:
-        client = anthropic.Anthropic(api_key=api_key or os.environ["HOMEHQ_ANTHROPIC_API_KEY"])
+    client = _build_client(api_key, client)
 
     message = client.messages.create(
         model=model or DEFAULT_MODEL,
@@ -384,8 +407,7 @@ def extract_from_image(image_bytes, media_type, api_key=None, model=None, client
     """
     import base64
 
-    if client is None:
-        client = anthropic.Anthropic(api_key=api_key or os.environ["HOMEHQ_ANTHROPIC_API_KEY"])
+    client = _build_client(api_key, client)
 
     message = client.messages.create(
         model=model or DEFAULT_MODEL,
