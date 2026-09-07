@@ -135,15 +135,22 @@ Respond with ONLY a JSON object (no prose, no markdown fences):
 - Write names in lower case, except brand names and proper nouns
   ("parmesan", but "Fritos").
 - Stock, bouillon and stock paste are staples.
+- The recipe's NAME usually names the dish's main components, and those are
+  always ingredients even when the notes never repeat them. "Pan-Fried Pork
+  Chops" needs pork chops; "Salmon, Potato & Vegetable" needs all three. Some
+  notes only discuss technique and name no ingredient at all -- read the title
+  in that case rather than returning an empty list.
 - Serving suggestions need judgement. Include an accompaniment only if it is
   one thing you would buy: sour cream, cheddar, avocado, tortillas. EXCLUDE
   accompaniments that are separate dishes needing their own cooking: mashed
   potatoes, salad, garlic bread, rice pilaf.
 - When the notes offer alternatives -- "serve with pasta, mashed potatoes,
   rice, or bread" -- that is a choice made at dinnertime, not a shopping list.
-  Include none of them.
-- Do not invent ingredients that the notes do not mention, even if the dish
-  would normally use them.
+  Include none of them, UNLESS the title names them as part of the dish.
+- Where alternatives are written with slashes ("broccoli/asparagus/green
+  beans"), pick the first as a stand-in rather than listing the slashed string.
+- Beyond the title's own components, do not invent ingredients the notes do
+  not mention, even if the dish would normally use them.
 
 Recipe: {name}
 
