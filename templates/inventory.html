@@ -2,7 +2,12 @@
 {% block title %}{{ storage|capitalize }} – Home HQ{% endblock %}
 {% block content %}
   <div class="card">
-    <h1 class="card__title">{{ storage|capitalize }}</h1>
+    <div class="top-actions">
+      <h1 class="card__title">{{ storage|capitalize }}</h1>
+      <span>
+        <a class="btn btn--primary btn--sm" href="{{ url_for('add_groceries') }}">Add by typing or photo</a>
+      </span>
+    </div>
     <hr class="card__rule">
     <p class="card__meta">Logged in as {{ user }} &middot; {{ items|length }} item{{ '' if items|length == 1 else 's' }}</p>
 

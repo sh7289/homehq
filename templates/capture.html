@@ -14,13 +14,13 @@
       <p class="form-error">{{ error }}</p>
     {% endif %}
 
-    <form method="post" action="{{ url_for('capture') }}" data-pending-message="Reading it&hellip;">
+    <form method="post" action="{{ url_for('capture') }}" data-pending-message="Staging for review&hellip;">
       <div class="field">
         <label for="text">What are you adding?</label>
         <textarea id="text" name="text" rows="5"
                   placeholder="two cans of chickpeas, a bag of jasmine rice, some frozen peas, half a bottle of olive oil">{{ text }}</textarea>
       </div>
-      <button class="btn btn--primary" type="submit">Read it</button>
+      <button class="btn btn--primary" type="submit">Preview groceries</button>
     </form>
     <p class="status-live" aria-live="polite" role="status"></p>
 

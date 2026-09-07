@@ -258,6 +258,35 @@ def create_app():
             active="home",
         )
 
+    @app.route("/add")
+    @login_required
+    def add_chooser():
+        """The single shared "start adding something" destination.
+
+        Organized by intent (Groceries / Recipe / Household item), not by
+        the backend route that ends up handling it -- a user shouldn't have
+        to already know the word "Capture" to add groceries. Each intent
+        hands off to whichever existing route/page does the actual work;
+        this page adds no new backend behavior of its own. Recipe's methods
+        already live at the top of the Recipes page (Task 3), so that tile
+        links straight there rather than duplicating those two buttons
+        here; Household item has only one method (Import's photo flow), so
+        it skips a method-choice screen entirely.
+        """
+        return render_template("add.html", active="add")
+
+    @app.route("/add/groceries")
+    @login_required
+    def add_groceries():
+        """Groceries' method choice: type it in, or a photo.
+
+        This is the screen a contextual "Add" control (e.g. on Pantry or
+        Freezer) jumps straight to, skipping the top-level intent chooser
+        above since the intent -- groceries -- is already known from
+        context.
+        """
+        return render_template("add_groceries.html", active="add")
+
     # The four summary views offered above the inventory rows. "all" is the
     # default and is never put in the query string (a bare /pantry means
     # "all"); the other three key straight into expiry.split_by_expiry()'s

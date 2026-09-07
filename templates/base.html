@@ -44,6 +44,10 @@
            class="nav__top-link {{ 'is-active' if active == 'home' else '' }}"
            {% if active == 'home' %}aria-current="page"{% endif %}>Home</a>
 
+        <a href="{{ url_for('add_chooser') }}"
+           class="nav__top-link {{ 'is-active' if active == 'add' else '' }}"
+           {% if active == 'add' %}aria-current="page"{% endif %}>Add</a>
+
         <div class="nav__group">
           <p class="nav__heading">Food</p>
           <ul class="nav__list">
@@ -101,10 +105,11 @@
            class="nav-mobile__item {{ 'is-active' if active == 'shopping-list' else '' }}"
            {% if active == 'shopping-list' %}aria-current="page"{% endif %}>Shopping</a>
 
-        {% set more_active = active in ['capture', 'import', 'report'] or active in nav_categories %}
+        {% set more_active = active in ['add', 'capture', 'import', 'report'] or active in nav_categories %}
         <details class="nav-mobile__disclosure" {% if more_active %}open{% endif %}>
           <summary class="nav-mobile__summary {{ 'is-active' if more_active else '' }}">More</summary>
           <div class="nav-mobile__panel nav-mobile__panel--more">
+            <a href="{{ url_for('add_chooser') }}" class="{{ 'is-active' if active == 'add' else '' }}" {% if active == 'add' %}aria-current="page"{% endif %}>Add</a>
             <a href="{{ url_for('capture') }}" class="{{ 'is-active' if active == 'capture' else '' }}" {% if active == 'capture' %}aria-current="page"{% endif %}>Capture</a>
             <a href="{{ url_for('import_review') }}" class="{{ 'is-active' if active == 'import' else '' }}" {% if active == 'import' %}aria-current="page"{% endif %}>Import</a>
             <a href="{{ url_for('report') }}" class="{{ 'is-active' if active == 'report' else '' }}" {% if active == 'report' %}aria-current="page"{% endif %}>Report</a>

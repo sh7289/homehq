@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Add groceries – Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <h1 class="card__title">Add Groceries</h1>
+    <hr class="card__rule">
+    <p class="card__meta">
+      Either way, nothing is added to the pantry or freezer until you review
+      what was found.
+    </p>
+
+    <div class="index-grid index-section">
+      <a href="{{ url_for('capture') }}">
+        <span class="index-grid__label">Free text or voice &middot; stages for review</span>
+        <span class="index-grid__name">Type it in</span>
+      </a>
+      <a href="{{ url_for('import_upload') }}">
+        <span class="index-grid__label">Receipt or shelf photo &middot; stages for review</span>
+        <span class="index-grid__name">Upload a photo</span>
+      </a>
+    </div>
+
+    <p class="card__meta">
+      Adding a recipe or a household item instead? <a href="{{ url_for('add_chooser') }}">Choose a different type</a>.
+    </p>
+  </div>
+{% endblock %}
