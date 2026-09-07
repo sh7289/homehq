@@ -148,6 +148,41 @@ def test_store_filters_by_max_effort(tmp_path):
     assert [r.slug for r in _store(tmp_path).filter(max_effort=3)] == ["tinga"]
 
 
+def test_store_filter_q_matches_recipe_name(tmp_path):
+    assert [r.slug for r in _store(tmp_path).filter(q="tinga")] == ["tinga"]
+
+
+def test_store_filter_q_matches_ingredient_name(tmp_path):
+    assert [r.slug for r in _store(tmp_path).filter(q="chipotle")] == ["tinga"]
+
+
+def test_store_filter_q_is_case_insensitive(tmp_path):
+    assert [r.slug for r in _store(tmp_path).filter(q="CHICKEN THIGHS")] == ["tinga"]
+
+
+def test_store_filter_q_is_a_substring_match(tmp_path):
+    assert [r.slug for r in _store(tmp_path).filter(q="scon")] == ["scones"]
+
+
+def test_store_filter_q_combines_with_other_filters(tmp_path):
+    """AND semantics: a search term narrows whatever the other filters
+    already selected, it doesn't replace them."""
+    store = _store(tmp_path)
+
+    # "flour" only matches Scones, which isn't a favorite -- combined with
+    # favorites_only the two conditions cancel each other out.
+    assert store.filter(q="flour", favorites_only=True) == []
+    assert [r.slug for r in store.filter(q="flour", favorites_only=False)] == ["scones"]
+
+
+def test_store_filter_q_of_blank_string_matches_everything(tmp_path):
+    assert [r.slug for r in _store(tmp_path).filter(q="   ")] == ["scones", "tinga"]
+
+
+def test_store_filter_q_no_match_returns_empty(tmp_path):
+    assert _store(tmp_path).filter(q="nonexistent-ingredient") == []
+
+
 def test_store_kinds_lists_kinds_present(tmp_path):
     assert _store(tmp_path).kinds() == ["baked", "meal"]
 

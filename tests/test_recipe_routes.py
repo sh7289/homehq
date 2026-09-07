@@ -440,15 +440,218 @@ def test_category_filter_narrows_the_list(client, app):
 
 
 def test_favorites_only_toggle_is_offered_and_works(client, app):
+    """The "Favorites" quick filter is a link (task 3), not a checkbox --
+    check it's offered by its target query param rather than a field name."""
     _write_recipe(app, "tinga.md", TINGA)
     _write_recipe(app, "scones.md", SCONES)
     _login(client)
 
-    assert b'name="favorites"' in client.get("/recipes").data
+    assert "favorites=on" in client.get("/recipes").data.decode()
 
     body = client.get("/recipes?favorites=on").data.decode()
     assert "Chicken Tinga Tacos" in body
     assert "Buttermilk Scones" not in body
+
+
+# --- task 3: search, quick filters, no-results states ---------------------
+
+
+def test_search_by_recipe_name(client, app):
+    _write_recipe(app, "tinga.md", TINGA)
+    _write_recipe(app, "scones.md", SCONES)
+    _login(client)
+
+    body = client.get("/recipes?q=tinga").data.decode()
+
+    assert "Chicken Tinga Tacos" in body
+    assert "Buttermilk Scones" not in body
+
+
+def test_search_by_ingredient_name(client, app):
+    _write_recipe(app, "tinga.md", TINGA)
+    _write_recipe(app, "scones.md", SCONES)
+    _login(client)
+
+    body = client.get("/recipes?q=chipotle").data.decode()
+
+    assert "Chicken Tinga Tacos" in body
+    assert "Buttermilk Scones" not in body
+
+
+def test_search_combines_with_favorites_filter(client, app):
+    """search "chicken" + Favorites only -> only favorited recipes whose
+    name or an ingredient matches "chicken" (AND semantics)."""
+    _write_recipe(app, "tinga.md", TINGA)  # favorite: true, has "chicken thighs"
+    _write_recipe(
+        app,
+        "other-chicken.md",
+        "---\nname: Chicken Salad\nkind: meal\nfavorite: false\n"
+        "ingredients:\n  - {name: chicken breast}\n---\nToss it.\n",
+    )
+    _login(client)
+
+    body = client.get("/recipes?q=chicken&favorites=on").data.decode()
+
+    assert "Chicken Tinga Tacos" in body
+    assert "Chicken Salad" not in body
+
+
+def test_search_combines_with_category_filter(client, app):
+    _write_recipe(
+        app, "chili.md",
+        "---\nname: Chili\nkind: meal\ncategory: Chili / Soup\n"
+        "ingredients:\n  - {name: chicken thighs}\n---\nSimmer.\n",
+    )
+    _write_recipe(
+        app, "taco.md",
+        "---\nname: Taco\nkind: meal\ncategory: Mexican\n"
+        "ingredients:\n  - {name: chicken thighs}\n---\nFold.\n",
+    )
+    _login(client)
+
+    body = client.get("/recipes?q=chicken&category=Mexican").data.decode()
+
+    assert "/recipes/taco" in body
+    assert "/recipes/chili" not in body
+
+
+def test_clearing_filters_restores_the_full_list(client, app):
+    _write_recipe(app, "tinga.md", TINGA)
+    _write_recipe(app, "scones.md", SCONES)
+    _login(client)
+
+    filtered = client.get("/recipes?q=tinga&favorites=on").data.decode()
+    assert "Buttermilk Scones" not in filtered
+
+    cleared = client.get("/recipes").data.decode()
+    assert "Chicken Tinga Tacos" in cleared
+    assert "Buttermilk Scones" in cleared
+
+
+def test_low_effort_quick_filter_matches_max_effort_semantics(client, app):
+    _write_recipe(app, "tinga.md", TINGA)   # effort: 2
+    _write_recipe(app, "scones.md", SCONES)  # effort: 4
+    _login(client)
+
+    body = client.get("/recipes?max_effort=2").data.decode()
+
+    assert "Chicken Tinga Tacos" in body
+    assert "Buttermilk Scones" not in body
+
+
+def test_unrecorded_effort_is_not_excluded_by_low_effort_filter_but_is_labelled(client, app):
+    """A recipe with no effort recorded isn't excluded by the low-effort
+    filter (that's existing RecipeStore.filter() behavior) -- but the row
+    must say so, never render it as if it were a known low-effort recipe."""
+    _write_recipe(
+        app, "mystery.md",
+        "---\nname: Mystery Effort\nkind: meal\n---\nCook it.\n",
+    )
+    _login(client)
+
+    unfiltered = client.get("/recipes").data.decode()
+    filtered = client.get("/recipes?max_effort=2").data.decode()
+
+    assert "Mystery Effort" in filtered
+    assert "effort not recorded" in filtered
+    # Not labelled at all when no effort filter is narrowing the list --
+    # avoids cluttering the everyday view with a non-issue.
+    assert "Mystery Effort" in unfiltered
+    assert "effort not recorded" not in unfiltered
+
+
+def test_missing_time_and_effort_are_never_defaulted(client, app):
+    _write_recipe(
+        app, "bare.md",
+        "---\nname: Bare Recipe\nkind: meal\n---\nJust cook.\n",
+    )
+    _login(client)
+
+    body = client.get("/recipes").data.decode()
+
+    assert "effort 0/5" not in body
+    assert "0 min" not in body
+
+
+def test_recorded_total_time_is_shown(client, app):
+    _write_recipe(
+        app, "timed.md",
+        "---\nname: Timed Recipe\nkind: meal\ntotal_minutes: 45\n---\nCook.\n",
+    )
+    _login(client)
+
+    body = client.get("/recipes").data.decode()
+
+    assert "45 min" in body
+
+
+def test_empty_library_shows_a_distinct_message_from_no_filter_results(client, app):
+    _login(client)
+
+    body = client.get("/recipes").data.decode()
+
+    assert "Nothing on file yet" in body
+    assert "No recipes match" not in body
+
+
+def test_filters_matching_nothing_show_a_distinct_message_from_empty_library(client, app):
+    _write_recipe(app, "tinga.md", TINGA)
+    _login(client)
+
+    body = client.get("/recipes?q=nonexistent-ingredient-xyz").data.decode()
+
+    assert "No recipes match" in body
+    assert "Nothing on file yet" not in body
+
+
+def test_matching_count_shown_versus_total(client, app):
+    _write_recipe(app, "tinga.md", TINGA)
+    _write_recipe(app, "scones.md", SCONES)
+    _login(client)
+
+    body = client.get("/recipes?favorites=on").data.decode()
+
+    assert "1 of 2 recipe" in body
+
+
+def test_active_filters_are_shown_with_a_clear_control(client, app):
+    _write_recipe(app, "tinga.md", TINGA)
+    _login(client)
+
+    body = client.get("/recipes?q=tinga&favorites=on").data.decode()
+
+    assert "filtered by" in body
+    assert "Clear filters" in body
+    # Unfiltered listing shouldn't show either.
+    plain = client.get("/recipes").data.decode()
+    assert "filtered by" not in plain
+    assert "Clear filters" not in plain
+
+
+def test_add_recipe_actions_are_at_the_top_of_the_page(client, app):
+    _write_recipe(app, "tinga.md", TINGA)
+    _login(client)
+
+    body = client.get("/recipes").data.decode()
+
+    assert body.index("Paste a recipe") < body.index("Chicken Tinga Tacos")
+    assert body.index("Add by hand") < body.index("Chicken Tinga Tacos")
+
+
+def test_long_recipe_name_and_meta_are_in_separate_stacked_elements(client, app):
+    """Regression guard for name/metadata collision at narrow widths: name
+    and meta must be in the row__info column wrapper, not loose flex
+    siblings of the row itself."""
+    _write_recipe(
+        app, "long.md",
+        "---\nname: A Genuinely Very Long Recipe Name That Could Wrap Awkwardly Next To Its Metadata\n"
+        "kind: meal\ncategory: Mexican\n---\nCook.\n",
+    )
+    _login(client)
+
+    body = client.get("/recipes").data.decode()
+
+    assert '<div class="row__info">' in body
 
 
 def test_paste_page_requires_login(client):

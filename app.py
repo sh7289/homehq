@@ -716,15 +716,37 @@ def create_app():
         max_effort = request.args.get("max_effort")
         category = request.args.get("category") or None
         favorites_only = request.args.get("favorites") == "on"
+        query = request.args.get("q", "").strip()
+        parsed_max_effort = int(max_effort) if max_effort else None
         matches = app.recipes.filter(
             kind=kind,
             category=category,
-            max_effort=int(max_effort) if max_effort else None,
+            max_effort=parsed_max_effort,
             favorites_only=favorites_only,
+            q=query or None,
         )
         groups = {}
         for recipe in matches:
             groups.setdefault(recipe.kind, []).append(recipe)
+
+        # Human-readable summary of what's currently narrowing the list, so
+        # the page can show it next to the match count and offer a single
+        # "Clear filters" control -- rather than the user having to infer
+        # what's active from which form controls happen to be filled in.
+        active_filters = []
+        if query:
+            active_filters.append(f'search "{query}"')
+        if favorites_only:
+            active_filters.append("Favorites only")
+        if parsed_max_effort is not None:
+            active_filters.append(
+                "effort 1 only" if parsed_max_effort == 1 else f"effort {parsed_max_effort} or less"
+            )
+        if kind:
+            active_filters.append(kind.replace("_", " ").replace("-", " ").title())
+        if category:
+            active_filters.append(category)
+
         return render_template(
             "recipes.html",
             groups=[{"kind": k, "recipes": groups[k]} for k in sorted(groups)],
@@ -734,7 +756,10 @@ def create_app():
             selected_category=category,
             selected_effort=max_effort,
             favorites_only=favorites_only,
+            query=query,
+            active_filters=active_filters,
             total=len(app.recipes.all()),
+            matched=len(matches),
             active="recipes",
         )
 

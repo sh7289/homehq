@@ -2,52 +2,89 @@
 {% block title %}Recipes – Home HQ{% endblock %}
 {% block content %}
   <div class="card">
-    <h1 class="card__title">Recipes</h1>
+    <div class="top-actions">
+      <h1 class="card__title">Recipes</h1>
+      <span>
+        <a class="btn btn--primary btn--sm" href="{{ url_for('recipe_paste') }}">Paste a recipe</a>
+        <a class="btn btn--sm" href="{{ url_for('recipe_new') }}">Add by hand</a>
+      </span>
+    </div>
     <hr class="card__rule">
-    <p class="card__meta">{{ total }} recipe{{ '' if total == 1 else 's' }} on file</p>
+    <p class="card__meta">
+      {{ matched }} of {{ total }} recipe{{ '' if total == 1 else 's' }}
+      {%- if active_filters %}
+        &middot; filtered by {{ active_filters|join(', ') }}
+        <a class="btn btn--sm btn--ghost" href="{{ url_for('recipes') }}">Clear filters</a>
+      {%- endif %}
+    </p>
 
     <form class="search-bar" method="get" action="{{ url_for('recipes') }}">
-      <select name="kind" aria-label="Kind">
-        <option value="">All kinds</option>
-        {% for kind in kinds %}
-          <option value="{{ kind }}" {{ 'selected' if selected_kind == kind else '' }}>{{ kind|titlecase }}</option>
-        {% endfor %}
-      </select>
-      <select name="category" aria-label="Category">
-        <option value="">All categories</option>
-        {% for category in categories %}
-          <option value="{{ category }}" {{ 'selected' if selected_category == category else '' }}>{{ category }}</option>
-        {% endfor %}
-      </select>
-      <select name="max_effort" aria-label="Maximum effort">
-        <option value="">Any effort</option>
-        {% for n in [1, 2, 3, 4] %}
-          <option value="{{ n }}" {{ 'selected' if selected_effort == n|string else '' }}>
-            {{ 'effort 1 only' if n == 1 else n ~ ' or less' }}
-          </option>
-        {% endfor %}
-      </select>
-      <label class="check">
-        <input type="checkbox" name="favorites" value="on" {{ 'checked' if favorites_only else '' }}>
-        Favorites only
-      </label>
-      <button class="btn" type="submit">Filter</button>
+      <label class="visually-hidden" for="q">Search recipes</label>
+      <input id="q" type="search" name="q" value="{{ query }}" placeholder="Search by name or ingredient&hellip;">
+      {% if selected_kind %}<input type="hidden" name="kind" value="{{ selected_kind }}">{% endif %}
+      {% if selected_category %}<input type="hidden" name="category" value="{{ selected_category }}">{% endif %}
+      {% if selected_effort %}<input type="hidden" name="max_effort" value="{{ selected_effort }}">{% endif %}
+      {% if favorites_only %}<input type="hidden" name="favorites" value="on">{% endif %}
+      <button class="btn" type="submit">Search</button>
     </form>
+
+    <div class="filter-bar" role="group" aria-label="Quick filters">
+      <a class="btn btn--sm {{ 'btn--primary' if favorites_only else 'btn--ghost' }}"
+         {% if favorites_only %}aria-current="true"{% endif %}
+         href="{{ url_for('recipes', q=(query or none), kind=selected_kind, category=selected_category, max_effort=selected_effort, favorites=(none if favorites_only else 'on')) }}">Favorites</a>
+      <a class="btn btn--sm {{ 'btn--primary' if selected_effort == '2' else 'btn--ghost' }}"
+         {% if selected_effort == '2' %}aria-current="true"{% endif %}
+         href="{{ url_for('recipes', q=(query or none), kind=selected_kind, category=selected_category, favorites=('on' if favorites_only else none), max_effort=(none if selected_effort == '2' else '2')) }}">Low effort</a>
+    </div>
+
+    <details class="disclosure">
+      <summary class="disclosure__summary">Advanced filters</summary>
+      <form class="search-bar" method="get" action="{{ url_for('recipes') }}">
+        {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
+        {% if favorites_only %}<input type="hidden" name="favorites" value="on">{% endif %}
+        <select name="kind" aria-label="Kind">
+          <option value="">All kinds</option>
+          {% for kind in kinds %}
+            <option value="{{ kind }}" {{ 'selected' if selected_kind == kind else '' }}>{{ kind|titlecase }}</option>
+          {% endfor %}
+        </select>
+        <select name="category" aria-label="Category">
+          <option value="">All categories</option>
+          {% for category in categories %}
+            <option value="{{ category }}" {{ 'selected' if selected_category == category else '' }}>{{ category }}</option>
+          {% endfor %}
+        </select>
+        <select name="max_effort" aria-label="Maximum effort">
+          <option value="">Any effort</option>
+          {% for n in [1, 2, 3, 4] %}
+            <option value="{{ n }}" {{ 'selected' if selected_effort == n|string else '' }}>
+              {{ 'effort 1 only' if n == 1 else n ~ ' or less' }}
+            </option>
+          {% endfor %}
+        </select>
+        <button class="btn" type="submit">Apply filters</button>
+      </form>
+    </details>
 
     {% for group in groups %}
       <span class="eyebrow">{{ group.kind|titlecase }} &middot; {{ group.recipes|length }}</span>
       <ul class="rows">
         {% for recipe in group.recipes %}
           <li class="row">
-            <span class="row__name"><a href="{{ url_for('recipe_detail', slug=recipe.slug) }}">{{ recipe.name }}</a></span>
-            {# Build the meta as a list so a missing field never leaves an
-               orphan separator behind. #}
-            {%- set bits = [] -%}
-            {%- if recipe.frontmatter.category %}{{- bits.append(recipe.frontmatter.category) or '' -}}{% endif -%}
-            {%- if recipe.cuisine %}{{- bits.append(recipe.cuisine|titlecase) or '' -}}{% endif -%}
-            {%- if recipe.effort %}{{- bits.append('effort ' ~ recipe.effort ~ '/5') or '' -}}{% endif -%}
-            {%- if recipe.frontmatter.serves %}{{- bits.append('serves ' ~ recipe.frontmatter.serves) or '' -}}{% endif -%}
-            <span class="row__meta">{{ bits|join(' · ') }}</span>
+            <div class="row__info">
+              <span class="row__name"><a href="{{ url_for('recipe_detail', slug=recipe.slug) }}">{{ recipe.name }}</a></span>
+              {# Build the meta as a list so a missing field never leaves an
+                 orphan separator behind. Order: category, effort, total
+                 time, servings -- title and category are the two things
+                 that decide "is this worth opening", the rest is detail. #}
+              {%- set bits = [] -%}
+              {%- if recipe.frontmatter.category %}{{- bits.append(recipe.frontmatter.category) or '' -}}{% endif -%}
+              {%- if recipe.effort %}{{- bits.append('effort ' ~ recipe.effort ~ '/5') or '' -}}
+              {%- elif selected_effort %}{{- bits.append('effort not recorded') or '' -}}{% endif -%}
+              {%- if recipe.frontmatter.total_minutes %}{{- bits.append(recipe.frontmatter.total_minutes ~ ' min') or '' -}}{% endif -%}
+              {%- if recipe.frontmatter.serves %}{{- bits.append('serves ' ~ recipe.frontmatter.serves) or '' -}}{% endif -%}
+              <span class="row__meta">{{ bits|join(' · ') }}</span>
+            </div>
             {# Most recipes here are vouched for, so badging those says
                nothing. The few nobody has tried are the useful signal. #}
             {% if not recipe.is_favorite %}<span class="tag-untried">Untried</span>{% endif %}
@@ -55,12 +92,18 @@
         {% endfor %}
       </ul>
     {% else %}
-      <ul class="rows">
-        <li class="row">Nothing on file yet — add the first recipe below.</li>
-      </ul>
+      {% if total == 0 %}
+        <ul class="rows">
+          <li class="row">Nothing on file yet — add the first recipe above.</li>
+        </ul>
+      {% else %}
+        <ul class="rows">
+          <li class="row">
+            <span>No recipes match your search and filters.</span>
+            <a class="btn btn--sm btn--ghost" href="{{ url_for('recipes') }}">Clear filters</a>
+          </li>
+        </ul>
+      {% endif %}
     {% endfor %}
-
-    <a class="btn btn--primary" href="{{ url_for('recipe_paste') }}">Paste a recipe</a>
-    <a class="btn" href="{{ url_for('recipe_new') }}">Add one by hand</a>
   </div>
 {% endblock %}
