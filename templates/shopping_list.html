@@ -2,10 +2,7 @@
 {% block title %}Shopping List – Home HQ{% endblock %}
 {% block content %}
   <div class="card">
-    <div class="top-actions">
-      <h1 class="card__title">Shopping List</h1>
-      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
-    </div>
+    <h1 class="card__title">Shopping List</h1>
     <hr class="card__rule">
     <p class="card__meta">{{ list_items|length }} item{{ '' if list_items|length == 1 else 's' }} to buy</p>
 

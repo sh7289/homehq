@@ -8,10 +8,10 @@
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
   <link rel="icon" href="{{ url_for('static', filename='icons/favicon.png') }}">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Home HQ">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="theme-color" content="#3b342c">
+  <meta name="theme-color" content="#ece4d3">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,39 +20,160 @@
 </head>
 <body>
   {% if current_user.is_authenticated %}
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <div class="shell">
-      <a class="wordmark" href="{{ url_for('home') }}">
-        <span class="wordmark__title">Home HQ</span>
-        <span class="wordmark__tag">household ledger</span>
-      </a>
-      <div class="tabs-wrap">
-        <ul class="tabs">
-          <li><a href="{{ url_for('home') }}" class="{{ 'is-active' if active == 'home' else '' }}">Index</a></li>
-          <li><a href="{{ url_for('pantry') }}" class="{{ 'is-active' if active == 'pantry' else '' }}">Pantry</a></li>
-          <li><a href="{{ url_for('freezer') }}" class="{{ 'is-active' if active == 'freezer' else '' }}">Freezer</a></li>
-          <li><a href="{{ url_for('recipes') }}" class="{{ 'is-active' if active == 'recipes' else '' }}">Recipes</a></li>
-          <li><a href="{{ url_for('shopping_list') }}" class="{{ 'is-active' if active == 'shopping-list' else '' }}">Shopping List</a></li>
-          <li><a href="{{ url_for('capture') }}" class="{{ 'is-active' if active == 'capture' else '' }}">Capture</a></li>
-          <li><a href="{{ url_for('import_review') }}" class="{{ 'is-active' if active == 'import' else '' }}">Import</a></li>
-          <li><a href="{{ url_for('report') }}" class="{{ 'is-active' if active == 'report' else '' }}">Report</a></li>
-          {% for category in nav_categories %}
-            <li><a href="{{ url_for('catalog_list', category=category) }}" class="{{ 'is-active' if active == category else '' }}">{{ category|titlecase }}</a></li>
-          {% endfor %}
-        </ul>
-      </div>
-      {% block content %}{% endblock %}
+      <header class="topbar">
+        <a class="wordmark" href="{{ url_for('home') }}">
+          <span class="wordmark__title">Home HQ</span>
+          <span class="wordmark__tag">household ledger</span>
+        </a>
+        <form class="account" method="post" action="{{ url_for('logout') }}">
+          <span class="account__name">{{ current_user.id }}</span>
+          <button class="btn btn--ghost btn--sm" type="submit">Log out</button>
+        </form>
+      </header>
+
+      {# Desktop nav rail: Home, then Food (the everyday destinations) and
+         Household (admin/insurance destinations, including every catalog
+         category nested under a Catalog disclosure). Hidden on narrow
+         viewports in favor of .nav-mobile below -- CSS display:none removes
+         whichever one isn't current from the accessibility tree, so a
+         screen reader or keyboard user only ever encounters one. #}
+      <nav class="nav" aria-label="Main">
+        <a href="{{ url_for('home') }}"
+           class="nav__top-link {{ 'is-active' if active == 'home' else '' }}"
+           {% if active == 'home' %}aria-current="page"{% endif %}>Home</a>
+
+        <div class="nav__group">
+          <p class="nav__heading">Food</p>
+          <ul class="nav__list">
+            <li><a href="{{ url_for('pantry') }}" class="nav__link {{ 'is-active' if active == 'pantry' else '' }}" {% if active == 'pantry' %}aria-current="page"{% endif %}>Pantry</a></li>
+            <li><a href="{{ url_for('freezer') }}" class="nav__link {{ 'is-active' if active == 'freezer' else '' }}" {% if active == 'freezer' %}aria-current="page"{% endif %}>Freezer</a></li>
+            <li><a href="{{ url_for('recipes') }}" class="nav__link {{ 'is-active' if active == 'recipes' else '' }}" {% if active == 'recipes' %}aria-current="page"{% endif %}>Recipes</a></li>
+            <li><a href="{{ url_for('shopping_list') }}" class="nav__link {{ 'is-active' if active == 'shopping-list' else '' }}" {% if active == 'shopping-list' %}aria-current="page"{% endif %}>Shopping list</a></li>
+          </ul>
+        </div>
+
+        <div class="nav__group">
+          <p class="nav__heading">Household</p>
+          <ul class="nav__list">
+            <li><a href="{{ url_for('capture') }}" class="nav__link {{ 'is-active' if active == 'capture' else '' }}" {% if active == 'capture' %}aria-current="page"{% endif %}>Capture</a></li>
+            <li><a href="{{ url_for('import_review') }}" class="nav__link {{ 'is-active' if active == 'import' else '' }}" {% if active == 'import' %}aria-current="page"{% endif %}>Import</a></li>
+            {% if nav_categories %}
+              <li>
+                <details class="nav__disclosure" {% if active in nav_categories %}open{% endif %}>
+                  <summary class="nav__summary {{ 'is-active' if active in nav_categories else '' }}">Catalog</summary>
+                  <ul class="nav__sublist">
+                    {% for category in nav_categories %}
+                      <li><a href="{{ url_for('catalog_list', category=category) }}" class="nav__link {{ 'is-active' if active == category else '' }}" {% if active == category %}aria-current="page"{% endif %}>{{ category|titlecase }}</a></li>
+                    {% endfor %}
+                  </ul>
+                </details>
+              </li>
+            {% endif %}
+            <li><a href="{{ url_for('report') }}" class="nav__link {{ 'is-active' if active == 'report' else '' }}" {% if active == 'report' %}aria-current="page"{% endif %}>Report</a></li>
+          </ul>
+        </div>
+      </nav>
+
+      {# Mobile bottom bar: five slots -- Home, Inventory (Pantry/Freezer),
+         Recipes, Shopping, More (Capture/Import/Catalog/Report). Inventory
+         and More are native <details>/<summary> disclosures, so they're
+         keyboard- and screen-reader-operable with no JS. #}
+      <nav class="nav-mobile" aria-label="Main">
+        <a href="{{ url_for('home') }}"
+           class="nav-mobile__item {{ 'is-active' if active == 'home' else '' }}"
+           {% if active == 'home' %}aria-current="page"{% endif %}>Home</a>
+
+        <details class="nav-mobile__disclosure" {% if active in ['pantry', 'freezer'] %}open{% endif %}>
+          <summary class="nav-mobile__summary {{ 'is-active' if active in ['pantry', 'freezer'] else '' }}">Inventory</summary>
+          <div class="nav-mobile__panel">
+            <a href="{{ url_for('pantry') }}" class="{{ 'is-active' if active == 'pantry' else '' }}" {% if active == 'pantry' %}aria-current="page"{% endif %}>Pantry</a>
+            <a href="{{ url_for('freezer') }}" class="{{ 'is-active' if active == 'freezer' else '' }}" {% if active == 'freezer' %}aria-current="page"{% endif %}>Freezer</a>
+          </div>
+        </details>
+
+        <a href="{{ url_for('recipes') }}"
+           class="nav-mobile__item {{ 'is-active' if active == 'recipes' else '' }}"
+           {% if active == 'recipes' %}aria-current="page"{% endif %}>Recipes</a>
+
+        <a href="{{ url_for('shopping_list') }}"
+           class="nav-mobile__item {{ 'is-active' if active == 'shopping-list' else '' }}"
+           {% if active == 'shopping-list' %}aria-current="page"{% endif %}>Shopping</a>
+
+        {% set more_active = active in ['capture', 'import', 'report'] or active in nav_categories %}
+        <details class="nav-mobile__disclosure" {% if more_active %}open{% endif %}>
+          <summary class="nav-mobile__summary {{ 'is-active' if more_active else '' }}">More</summary>
+          <div class="nav-mobile__panel nav-mobile__panel--more">
+            <a href="{{ url_for('capture') }}" class="{{ 'is-active' if active == 'capture' else '' }}" {% if active == 'capture' %}aria-current="page"{% endif %}>Capture</a>
+            <a href="{{ url_for('import_review') }}" class="{{ 'is-active' if active == 'import' else '' }}" {% if active == 'import' %}aria-current="page"{% endif %}>Import</a>
+            <a href="{{ url_for('report') }}" class="{{ 'is-active' if active == 'report' else '' }}" {% if active == 'report' %}aria-current="page"{% endif %}>Report</a>
+            {% if nav_categories %}
+              <p class="nav-mobile__panel-heading">Catalog</p>
+              {% for category in nav_categories %}
+                <a href="{{ url_for('catalog_list', category=category) }}" class="{{ 'is-active' if active == category else '' }}" {% if active == category %}aria-current="page"{% endif %}>{{ category|titlecase }}</a>
+              {% endfor %}
+            {% endif %}
+          </div>
+        </details>
+      </nav>
+
+      <main id="main-content" class="main">
+        {% block content %}{% endblock %}
+      </main>
     </div>
   {% else %}
     {% block guest_content %}{% endblock %}
   {% endif %}
 
   <script>
-    document.addEventListener("click", function (event) {
-      var toggle = event.target.closest(".js-edit-toggle");
-      if (!toggle) return;
-      var panel = document.getElementById(toggle.dataset.target);
-      if (panel) panel.hidden = !panel.hidden;
-    });
+    (function () {
+      // Keeps aria-expanded/aria-controls in sync on the shared "edit panel"
+      // disclosure pattern (a button with .js-edit-toggle + data-target
+      // toggles a panel's `hidden` attribute -- used by inventory, catalog
+      // delete, import review, and shopping list). A panel can have more
+      // than one toggle referencing it (an opener outside the panel, plus a
+      // Cancel button inside it); when an inside control closes the panel,
+      // focus returns to whichever control opened it, instead of being left
+      // on a button that just disappeared.
+      function syncToggle(panel) {
+        var expanded = String(!panel.hidden);
+        document.querySelectorAll('[data-target="' + panel.id + '"]').forEach(function (el) {
+          el.setAttribute("aria-controls", panel.id);
+          el.setAttribute("aria-expanded", expanded);
+        });
+      }
+
+      var seenPanels = {};
+      document.querySelectorAll(".js-edit-toggle[data-target]").forEach(function (toggle) {
+        var id = toggle.dataset.target;
+        if (seenPanels[id]) return;
+        seenPanels[id] = true;
+        var panel = document.getElementById(id);
+        if (panel) syncToggle(panel);
+      });
+
+      document.addEventListener("click", function (event) {
+        var toggle = event.target.closest(".js-edit-toggle");
+        if (!toggle) return;
+        var panel = document.getElementById(toggle.dataset.target);
+        if (!panel) return;
+
+        var openedFromInsidePanel = panel.contains(toggle);
+        panel.hidden = !panel.hidden;
+        syncToggle(panel);
+
+        if (!openedFromInsidePanel) {
+          if (!toggle.id) {
+            toggle.id = "toggle-" + Math.random().toString(36).slice(2);
+          }
+          panel.dataset.openerId = toggle.id;
+        } else if (panel.hidden && panel.dataset.openerId) {
+          var opener = document.getElementById(panel.dataset.openerId);
+          if (opener) opener.focus();
+        }
+      });
+    })();
   </script>
 </body>
 </html>

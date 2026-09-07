@@ -1,11 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ recipe.name }} – Home HQ{% endblock %}
 {% block content %}
-  <div class="card">
-    <div class="top-actions">
-      <h1 class="card__title">{{ recipe.name }}</h1>
-      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
-    </div>
+  <div class="card card--prose">
+    <h1 class="card__title">{{ recipe.name }}</h1>
     <hr class="card__rule">
     <p class="card__meta">
       {{ recipe.kind|titlecase }}

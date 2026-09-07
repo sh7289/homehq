@@ -1,13 +1,11 @@
 /* ============================================================
    Home HQ — "the household ledger"
-   A card-catalog drawer: a dark walnut frame holding a lifted
-   cream index card. Folder-tab navigation, a red ledger rule
-   under titles, rubber-stamped EXPIRED marks on expired goods.
+   A lifted cream index card on a light neutral page. Folder-tab
+   navigation, a red ledger rule under titles, rubber-stamped
+   EXPIRED marks on expired goods.
    ============================================================ */
 
 :root {
-  --drawer: #3b342c;
-  --drawer-deep: #2f2921;
   --paper: #f7f1e1;
   --paper-dim: #efe6cc;
   --ink: #2b2420;
@@ -16,9 +14,13 @@
   --teal-dark: #204d44;
   --rust: #a6402b;
   --amber: #c98a2c;
+  /* Darkened variant of --amber for text -- the raw --amber is ~2.4-2.6:1
+     against cream, well under WCAG's 4.5:1 minimum for text. --amber stays
+     as-is for borders/backgrounds (restrained accent use, not text), this
+     is the one to reach for whenever amber is a foreground color. */
+  --amber-text: #7a5310;
   --sage: #7c8a5e;
   --line: rgba(43, 36, 32, 0.16);
-  --line-on-drawer: rgba(247, 241, 225, 0.16);
 
   --font-display: "Special Elite", "Courier New", monospace;
   --font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -26,6 +28,56 @@
 
   --radius: 7px;
   --radius-sm: 4px;
+
+  /* ---- shared design-system tokens ----
+     Spacing / typography / surface / focus / status. Later pages in this
+     app should reach for these rather than hand-rolled values. */
+
+  /* spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* typography scale (font-family/case rules live on the elements that use
+     them -- this is just sizing) */
+  --text-xs: 0.75rem;
+  --text-sm: 0.85rem;
+  --text-base: 1rem;
+  --text-lg: 1.15rem;
+  --text-xl: 1.5rem;
+
+  /* surfaces */
+  --surface-page: #ece4d3;
+  --surface-card: var(--paper);
+  --surface-card-alt: var(--paper-dim);
+  --surface-border: var(--line);
+  --surface-ink: var(--ink);
+  --surface-ink-soft: var(--ink-soft);
+
+  /* focus */
+  --focus-ring-color: var(--teal);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* status -- pair a border/background-safe accent with a text-safe,
+     4.5:1-checked variant. Reach for the *-text one for foreground text. */
+  --status-success: var(--teal);
+  --status-success-text: var(--teal-dark);
+  --status-warning: var(--amber);
+  --status-warning-text: var(--amber-text);
+  --status-danger: var(--rust);
+  --status-danger-text: var(--rust);
+
+  /* layout */
+  --shell-max-width: 1100px;
+  --prose-max-width: 70ch;
+  --nav-rail-width: 220px;
+  --nav-mobile-height: 4.5rem;
+  --touch-target: 44px;
 }
 
 * {
@@ -50,30 +102,48 @@
 }
 
 html {
-  color-scheme: dark;
+  /* Surfaces are light throughout -- native controls (checkboxes, date
+     pickers, etc.) should render with light-theme chrome to match, not the
+     dark-theme chrome `dark` was forcing on them. */
+  color-scheme: light;
+  /* A fixed mobile nav bar covers the bottom of the viewport; without this
+     the browser can scroll a focused field to right underneath it. */
+  scroll-padding-bottom: calc(var(--nav-mobile-height) + env(safe-area-inset-bottom) + 1rem);
+  /* Belt-and-braces: nothing here should ever cause page-level horizontal
+     scroll. `clip` (not `hidden`) so this doesn't make html/body a scroll
+     container -- `hidden` on only one axis computes the other to `auto`
+     per spec, which would quietly break the sticky nav rail below. */
+  overflow-x: clip;
+}
+
+@media (min-width: 860px) {
+  html {
+    scroll-padding-bottom: 0;
+  }
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--drawer);
+  background: var(--surface-page);
   background-image: radial-gradient(
       ellipse at top,
-      rgba(255, 255, 255, 0.04),
+      rgba(255, 255, 255, 0.5),
       transparent 60%
     ),
     repeating-linear-gradient(
       90deg,
-      rgba(0, 0, 0, 0.06) 0px,
-      rgba(0, 0, 0, 0.06) 1px,
+      rgba(43, 36, 32, 0.035) 0px,
+      rgba(43, 36, 32, 0.035) 1px,
       transparent 1px,
       transparent 64px
     );
-  color: var(--paper);
+  color: var(--ink);
   font-family: var(--font-body);
   font-size: 16px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
 }
 
 a {
@@ -96,10 +166,44 @@ textarea {
 /* ---------- shell ---------- */
 
 .shell {
-  max-width: 780px;
+  max-width: var(--shell-max-width);
   margin: 0 auto;
-  padding: calc(2rem + env(safe-area-inset-top)) calc(1.25rem + env(safe-area-inset-right))
-    4rem calc(1.25rem + env(safe-area-inset-left));
+  padding: calc(1.5rem + env(safe-area-inset-top)) calc(1.25rem + env(safe-area-inset-right))
+    2.5rem calc(1.25rem + env(safe-area-inset-left));
+}
+
+/* First focusable element in the authenticated shell -- invisible until it
+   receives keyboard focus, so a keyboard/screen-reader user can jump past
+   the nav straight to page content. */
+.skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 100;
+  transform: translateY(-150%);
+  transition: transform 0.15s ease;
+  background: var(--surface-card);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  text-decoration: none;
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 14px -6px rgba(43, 36, 32, 0.35);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.4rem;
 }
 
 .wordmark {
@@ -107,14 +211,13 @@ textarea {
   align-items: baseline;
   gap: 0.6rem;
   text-decoration: none;
-  margin-bottom: 1.1rem;
 }
 
 .wordmark__title {
   font-family: var(--font-display);
   font-size: 1.35rem;
   letter-spacing: 0.02em;
-  color: var(--paper);
+  color: var(--ink);
 }
 
 .wordmark__tag {
@@ -122,80 +225,290 @@ textarea {
   font-size: 0.68rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--paper-dim);
-  opacity: 0.55;
+  color: var(--ink-soft);
+  opacity: 0.75;
 }
 
-/* ---------- folder-tab nav ---------- */
-
-.tabs-wrap {
-  position: relative;
-}
-
-.tabs-wrap::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 2rem;
-  background: linear-gradient(to right, transparent, var(--drawer));
-  pointer-events: none;
-}
-
-.tabs {
+.account {
   display: flex;
-  gap: 0.3rem;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.account__name {
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* ---------- primary navigation ---------- */
+/* Two parallel <nav> regions -- a rail for desktop, a bottom bar for
+   mobile -- toggled with display, never both visible/in the a11y tree at
+   once. Grouped destinations (Catalog on desktop, Inventory/More on
+   mobile) use native <details>/<summary> so the disclosure is keyboard and
+   screen-reader operable without any JS. */
+
+.nav {
+  display: none;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+
+.nav__top-link {
+  display: flex;
+  align-items: center;
+  min-height: var(--touch-target);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+}
+
+.nav__top-link:hover {
+  background: var(--surface-card-alt);
+}
+
+.nav__top-link.is-active {
+  background: var(--status-success);
+  color: var(--paper);
+}
+
+.nav__heading {
+  margin: 0 0 0.35rem;
+  padding: 0 0.75rem;
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+}
+
+.nav__list {
   list-style: none;
   margin: 0;
   padding: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
 }
 
-.tabs::-webkit-scrollbar {
+.nav__link,
+.nav__summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: var(--touch-target);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  cursor: pointer;
+  list-style: none;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.nav__summary::-webkit-details-marker {
   display: none;
 }
 
-.tabs a {
-  display: inline-block;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  text-decoration: none;
-  color: var(--paper-dim);
-  background: var(--drawer-deep);
-  border: 1px solid var(--line-on-drawer);
-  border-bottom: none;
-  border-radius: 5px 5px 0 0;
-  padding: 0.5rem 0.85rem 0.6rem;
-  transform: translateY(2px);
-  transition: transform 0.12s ease, color 0.12s ease, background 0.12s ease;
+.nav__summary {
+  justify-content: space-between;
 }
 
-.tabs a:hover {
+.nav__summary::after {
+  content: "\203A"; /* › */
+  color: var(--ink-soft);
+  transition: transform 0.12s ease;
+}
+
+.nav__disclosure[open] > .nav__summary::after {
+  transform: rotate(90deg);
+}
+
+.nav__link:hover,
+.nav__summary:hover {
+  background: var(--surface-card-alt);
+}
+
+.nav__link.is-active {
+  background: var(--status-success);
   color: var(--paper);
-  transform: translateY(0);
+  font-weight: 600;
 }
 
-.tabs a.is-active {
-  color: var(--ink);
-  background: var(--paper);
-  border-color: var(--paper);
-  transform: translateY(0);
+/* The Catalog group heading itself isn't a page, so it gets a lighter
+   "something in here is active" treatment rather than the full fill. */
+.nav__summary.is-active {
+  color: var(--status-success-text);
   font-weight: 600;
+}
+
+.nav__sublist {
+  list-style: none;
+  margin: 0.15rem 0 0.25rem;
+  padding-left: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  border-left: 2px solid var(--line);
+}
+
+/* ---------- mobile bottom bar ---------- */
+
+.nav-mobile {
+  display: flex;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  gap: 0.1rem;
+  background: var(--surface-card);
+  border-top: 1px solid var(--line);
+  padding: 0.3rem calc(0.3rem + env(safe-area-inset-right))
+    calc(0.3rem + env(safe-area-inset-bottom)) calc(0.3rem + env(safe-area-inset-left));
+}
+
+.nav-mobile__item,
+.nav-mobile__summary {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  min-height: var(--touch-target);
+  padding: 0.3rem 0.15rem;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--ink-soft);
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  text-align: center;
+  cursor: pointer;
+  list-style: none;
+}
+
+.nav-mobile__summary::-webkit-details-marker {
+  display: none;
+}
+
+.nav-mobile__item:hover,
+.nav-mobile__summary:hover {
+  background: var(--surface-card-alt);
+}
+
+.nav-mobile__item.is-active,
+.nav-mobile__summary.is-active {
+  color: var(--status-success-text);
+  font-weight: 600;
+}
+
+.nav-mobile__disclosure {
+  position: relative;
+  flex: 1 1 0;
+}
+
+.nav-mobile__panel {
+  position: absolute;
+  bottom: calc(100% + 0.5rem);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  min-width: 10rem;
+  max-width: calc(100vw - 1.5rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem;
+  box-shadow: 0 -10px 24px -14px rgba(43, 36, 32, 0.35);
+}
+
+.nav-mobile__panel a {
+  display: flex;
+  align-items: center;
+  min-height: var(--touch-target);
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.nav-mobile__panel a:hover {
+  background: var(--surface-card-alt);
+}
+
+.nav-mobile__panel a.is-active {
+  background: var(--surface-card-alt);
+  color: var(--status-success-text);
+  font-weight: 600;
+}
+
+.nav-mobile__panel-heading {
+  margin: 0.3rem 0 0.1rem;
+  padding: 0 0.6rem;
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.main {
+  min-width: 0;
+  padding-bottom: calc(var(--nav-mobile-height) + env(safe-area-inset-bottom) + 1.5rem);
+}
+
+@media (min-width: 860px) {
+  .shell {
+    display: grid;
+    grid-template-columns: minmax(180px, var(--nav-rail-width)) minmax(0, 1fr);
+    grid-template-areas: "topbar topbar" "nav main";
+    column-gap: 2.5rem;
+    row-gap: 0.5rem;
+    align-items: start;
+  }
+
+  .topbar {
+    grid-area: topbar;
+    margin-bottom: 1.8rem;
+  }
+
+  .nav {
+    display: flex;
+    grid-area: nav;
+    position: sticky;
+    top: 1.5rem;
+  }
+
+  .nav-mobile {
+    display: none;
+  }
+
+  .main {
+    grid-area: main;
+    padding-bottom: 3rem;
+  }
 }
 
 /* ---------- the card ---------- */
 
 .card {
-  background: var(--paper);
+  background: var(--surface-card);
   color: var(--ink);
   border-radius: 0 var(--radius) var(--radius) var(--radius);
   padding: 1.8rem 1.9rem 2.1rem;
-  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.55), 0 2px 0 rgba(0, 0, 0, 0.25);
+  box-shadow: 0 10px 26px -16px rgba(43, 36, 32, 0.28), 0 1px 0 rgba(43, 36, 32, 0.05);
 }
 
 .card--narrow {
@@ -203,11 +516,19 @@ textarea {
   margin: 3rem auto 0;
 }
 
+/* Recipe prose (ingredients, method, notes) reads best narrower than the
+   wide shell now allows for list/dashboard pages -- cap it like a printed
+   column even though the rail beside it can stretch out. */
+.card--prose {
+  max-width: var(--prose-max-width);
+}
+
 .card__title {
   font-family: var(--font-display);
   font-size: 1.5rem;
   margin: 0 0 0.15rem;
   color: var(--ink);
+  overflow-wrap: anywhere;
 }
 
 .card__rule {
@@ -219,18 +540,17 @@ textarea {
 }
 
 .card__meta {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  letter-spacing: 0.06em;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
   color: var(--ink-soft);
   margin: -0.9rem 0 1.4rem;
 }
 
 .eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--ink-soft);
   display: block;
   margin-bottom: 0.3rem;
@@ -307,10 +627,9 @@ textarea {
 }
 
 .field label {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 600;
   color: var(--ink-soft);
 }
 
@@ -328,9 +647,10 @@ textarea {
 .field select:focus,
 .field textarea:focus,
 a:focus-visible,
-button:focus-visible {
-  outline: 2px solid var(--teal);
-  outline-offset: 2px;
+button:focus-visible,
+summary:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .field input:focus,
@@ -372,15 +692,19 @@ button:focus-visible {
 /* ---------- buttons ---------- */
 
 .btn {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: var(--touch-target);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 600;
   border: 1px solid var(--ink);
   background: transparent;
   color: var(--ink);
   border-radius: var(--radius-sm);
-  padding: 0.5rem 0.9rem;
+  padding: 0.5rem 1rem;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, transform 0.06s ease;
 }
@@ -418,10 +742,10 @@ button:focus-visible {
 }
 
 .btn--sm {
-  padding: 0.5rem 0.7rem;
-  font-size: 0.68rem;
-  min-height: 2.25rem;
-  min-width: 2.25rem;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.8rem;
+  min-height: var(--touch-target);
+  min-width: var(--touch-target);
 }
 
 .inline-form {
@@ -516,8 +840,8 @@ button:focus-visible {
   font-family: var(--font-mono);
   font-size: 0.72rem;
   letter-spacing: 0.04em;
-  color: var(--amber);
-  border: 1px solid var(--amber);
+  color: var(--status-warning-text);
+  border: 1px solid var(--status-warning);
   border-radius: 999px;
   padding: 0.25rem 0.65rem;
   background: rgba(201, 138, 44, 0.08);
@@ -548,8 +872,8 @@ button:focus-visible {
 }
 
 .tag-untried {
-  color: var(--amber);
-  border: 1px dashed var(--amber);
+  color: var(--status-warning-text);
+  border: 1px dashed var(--status-warning);
   background: transparent;
 }
 
@@ -700,8 +1024,8 @@ button:focus-visible {
 }
 
 .field__help {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
   line-height: 1.45;
   color: var(--ink-soft);
 }
@@ -747,8 +1071,8 @@ button:focus-visible {
 }
 
 .row__meta {
-  font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
   color: var(--ink-soft);
 }
 
@@ -762,7 +1086,7 @@ button:focus-visible {
 }
 
 .row__expiry--soon {
-  color: var(--amber);
+  color: var(--status-warning-text);
 }
 
 .row__actions {
@@ -814,10 +1138,9 @@ button:focus-visible {
 }
 
 .spec-list dt {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 600;
   color: var(--ink-soft);
 }
 
@@ -915,12 +1238,15 @@ button:focus-visible {
   }
 
   .shell {
+    display: block; /* undo the desktop nav-rail grid -- no empty column left behind */
     max-width: none;
     padding: 0;
   }
 
-  .wordmark,
-  .tabs-wrap,
+  .topbar,
+  .nav,
+  .nav-mobile,
+  .skip-link,
   .no-print {
     display: none;
   }
@@ -939,7 +1265,8 @@ button:focus-visible {
 
 @media (max-width: 560px) {
   .shell {
-    padding: 1.25rem 0.85rem 3rem;
+    padding: calc(1.25rem + env(safe-area-inset-top)) calc(0.85rem + env(safe-area-inset-right))
+      1.5rem calc(0.85rem + env(safe-area-inset-left));
   }
 
   .card {
