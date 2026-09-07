@@ -17,17 +17,79 @@
       </p>
     {% endif %}
 
+    <script type="application/json" id="step-editor-ingredients">{{ recipe.ingredients|map(attribute='name')|list|tojson }}</script>
     <form method="post" action="{{ url_for('recipe_steps_edit', slug=recipe.slug) }}">
-      <div class="field">
-        <label for="steps">One step per line</label>
-        <textarea id="steps" name="steps" rows="10"
-                  placeholder="s1 | season and sear | chicken thighs&#10;s2 | simmer 45 min | s1, tomatoes&#10;s3 | serve in tortillas | s2, tortillas">{{ lines }}</textarea>
-        <span class="field__help">
-          <code>id | action | inputs</code>. Each input is either an ingredient
-          name exactly as written in the ingredient list, or the id of an
-          earlier step. The last step is the finished dish.
-        </span>
+      <div class="editor-rows" id="step-editor" data-js-step-editor
+           data-raw-field="steps-raw" data-source-field="steps-source"
+           data-ingredients-source="step-editor-ingredients">
+        <input type="hidden" name="steps_source" id="steps-source" value="rows">
+        <div class="editor-rows__list">
+          {% for row in step_rows %}
+            <div class="editor-row" data-row>
+              <input type="hidden" name="step_row" value="{{ row.uid }}">
+              <p class="editor-row__number">Step {{ loop.index }}</p>
+              <div class="field">
+                <label for="step-action-{{ row.uid }}">What happens</label>
+                <input id="step-action-{{ row.uid }}" type="text" name="step_action"
+                       value="{{ row.action }}" placeholder="season and sear">
+              </div>
+              <div class="field">
+                <span class="field__help">Uses</span>
+                {% if row.ingredient_options or row.step_options or row.orphans %}
+                  <div class="picker">
+                    {% for opt in row.ingredient_options %}
+                      <label class="picker__option">
+                        <input type="checkbox" name="step_input__{{ row.uid }}"
+                               value="ingredient:{{ opt.name }}" {{ 'checked' if opt.checked else '' }}>
+                        {{ opt.name }}
+                      </label>
+                    {% endfor %}
+                    {% for opt in row.step_options %}
+                      <label class="picker__option">
+                        <input type="checkbox" name="step_input__{{ row.uid }}"
+                               value="step:{{ opt.uid }}" {{ 'checked' if opt.checked else '' }}>
+                        {{ opt.label }}
+                      </label>
+                    {% endfor %}
+                    {% for orphan in row.orphans %}
+                      <label class="picker__option picker__option--orphan">
+                        <input type="checkbox" name="step_input__{{ row.uid }}"
+                               value="ingredient:{{ orphan }}" checked>
+                        &ldquo;{{ orphan }}&rdquo; (not recognized &mdash; untick to drop)
+                      </label>
+                    {% endfor %}
+                  </div>
+                {% else %}
+                  <p class="picker__empty">
+                    No ingredients or earlier steps to choose from yet.
+                  </p>
+                {% endif %}
+              </div>
+              <div class="editor-row__actions">
+                <button type="button" class="btn btn--sm btn--ghost js-row-up">Move up</button>
+                <button type="button" class="btn btn--sm btn--ghost js-row-down">Move down</button>
+                <button type="button" class="btn btn--sm btn--ghost js-row-remove">Remove</button>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        <button type="button" class="btn btn--sm js-row-add">Add step</button>
       </div>
+
+      <details class="disclosure">
+        <summary class="disclosure__summary">Advanced: edit as raw text</summary>
+        <div class="field">
+          <label for="steps-raw">One step per line</label>
+          <textarea id="steps-raw" name="steps" rows="10"
+                    placeholder="s1 | season and sear | chicken thighs&#10;s2 | simmer 45 min | s1, tomatoes&#10;s3 | serve in tortillas | s2, tortillas">{{ lines }}</textarea>
+          <span class="field__help">
+            <code>id | action | inputs</code>. Each input is either an ingredient
+            name exactly as written in the ingredient list, or the id of an
+            earlier step. The last step is the finished dish.
+          </span>
+        </div>
+      </details>
+
       <button class="btn btn--primary" type="submit">Save steps</button>
     </form>
 
@@ -52,4 +114,6 @@
 
     <a class="btn btn--ghost" href="{{ url_for('recipe_detail', slug=recipe.slug) }}">Back to recipe</a>
   </div>
+
+  <script src="{{ url_for('static', filename='js/recipe-editor.js') }}"></script>
 {% endblock %}

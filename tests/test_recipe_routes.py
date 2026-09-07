@@ -833,3 +833,365 @@ def test_detail_page_links_to_the_editor(client, app):
     body = client.get("/recipes/editable").data.decode()
 
     assert "/recipes/editable/edit" in body
+
+
+# --- task 8: row-based ingredient/step editors, replacing raw syntax ------
+
+ROWS = """---
+name: Rows
+kind: meal
+ingredients:
+  - {name: onion, quantity: 1, unit: count}
+---
+Cook.
+"""
+
+STEP_INGREDIENTS = """---
+name: Steppy
+kind: meal
+ingredients:
+  - {name: chicken}
+  - {name: tomatoes}
+---
+Cook.
+"""
+
+LEGACY_STEP_REF = """---
+name: Legacy
+kind: meal
+ingredients:
+  - {name: chicken}
+steps:
+  - {id: s1, action: sear, inputs: [chicken, butter]}
+---
+Notes.
+"""
+
+
+def test_row_editor_edits_amount_and_reorders_without_delimiters(client, app):
+    _write_recipe(app, "rows.md", ROWS)
+    _login(client)
+
+    response = client.post(
+        "/recipes/rows/ingredients",
+        data={
+            "ingredient_row": ["0", "1"],
+            "ingredient_name": ["garlic", "onion"],
+            "ingredient_quantity": ["2", "3"],
+            "ingredient_unit": ["clove", "count"],
+            "ingredient_fresh": ["1"],
+            "ingredients_source": "rows",
+        },
+    )
+
+    assert response.status_code == 302
+    recipe = app.recipes.get("rows")
+    assert [i["name"] for i in recipe.ingredients] == ["garlic", "onion"]
+    assert recipe.ingredients[1]["quantity"] == 3
+    assert recipe.ingredients[1]["fresh"] is True
+    assert recipe.ingredients[0]["fresh"] is False
+
+
+def test_row_with_no_name_is_dropped(client, app):
+    """Only the name is required per row -- an empty one is just skipped,
+    not saved as a junk entry."""
+    _write_recipe(app, "rows.md", ROWS)
+    _login(client)
+
+    client.post(
+        "/recipes/rows/ingredients",
+        data={
+            "ingredient_row": ["0", "1"],
+            "ingredient_name": ["", "onion"],
+            "ingredient_quantity": ["", "3"],
+            "ingredient_unit": ["", "count"],
+            "ingredients_source": "rows",
+        },
+    )
+
+    assert [i["name"] for i in app.recipes.get("rows").ingredients] == ["onion"]
+
+
+def test_advanced_source_flag_makes_the_raw_textarea_authoritative(client, app):
+    """When the Advanced box was the one actually edited, its content wins
+    even though the (now-stale) row fields are also present in the POST --
+    this is how the escape hatch stays independently usable."""
+    _write_recipe(app, "rows.md", ROWS)
+    _login(client)
+
+    client.post(
+        "/recipes/rows/ingredients",
+        data={
+            "ingredient_row": ["0"],
+            "ingredient_name": ["onion"],
+            "ingredient_quantity": ["1"],
+            "ingredient_unit": ["count"],
+            "ingredients_source": "advanced",
+            "ingredients": "garlic | 2 | clove | fresh",
+        },
+    )
+
+    recipe = app.recipes.get("rows")
+    assert [i["name"] for i in recipe.ingredients] == ["garlic"]
+    assert recipe.ingredients[0]["fresh"] is True
+
+
+def test_ingredient_row_editor_get_reflects_saved_values(client, app):
+    _write_recipe(app, "rows.md", ROWS)
+    _login(client)
+
+    body = client.get("/recipes/rows/ingredients").data.decode()
+
+    assert 'value="onion"' in body
+    assert 'value="count"' in body
+    assert "ingredient_fresh" in body
+    assert "ingredient_staple" in body
+
+
+def test_suggested_ingredients_populate_the_row_editor(client, app, monkeypatch):
+    import ai_extract
+
+    _write_recipe(app, "rows.md", ROWS)
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_ingredients",
+        lambda name, text, api_key=None: [
+            {"name": "cumin", "quantity": 2, "unit": "tsp", "fresh": False, "staple": True}
+        ],
+    )
+    _login(client)
+
+    body = client.post("/recipes/rows/suggest-ingredients").data.decode()
+
+    assert 'value="cumin"' in body
+    assert 'value="2"' in body
+    # Nothing is saved by a suggestion.
+    assert [i["name"] for i in app.recipes.get("rows").ingredients] == ["onion"]
+
+
+def test_new_recipe_form_saves_ingredients_via_structured_rows(client, app):
+    _login(client)
+
+    response = client.post(
+        "/recipes/new",
+        data={
+            "name": "Row Recipe",
+            "kind": "meal",
+            "ingredient_row": ["0", "1"],
+            "ingredient_name": ["cod fillet", "olive oil"],
+            "ingredient_quantity": ["2", "1"],
+            "ingredient_unit": ["count", "tbsp"],
+            "ingredient_fresh": ["0"],
+            "ingredient_staple": ["1"],
+            "ingredients_source": "rows",
+            "body": "Bake it.",
+        },
+    )
+
+    assert response.status_code == 302
+    recipe = app.recipes.get("row-recipe")
+    assert recipe is not None
+    assert recipe.ingredients[0]["name"] == "cod fillet"
+    assert recipe.ingredients[0]["fresh"] is True
+    assert recipe.ingredients[1]["staple"] is True
+
+
+def test_row_editor_saves_steps_from_structured_fields(client, app):
+    _write_recipe(app, "steppy.md", STEP_INGREDIENTS)
+    _login(client)
+
+    response = client.post(
+        "/recipes/steppy/steps",
+        data={
+            "step_row": ["a", "b"],
+            "step_action": ["sear", "simmer"],
+            "step_input__a": ["ingredient:chicken"],
+            "step_input__b": ["step:a", "ingredient:tomatoes"],
+            "steps_source": "rows",
+        },
+    )
+
+    assert response.status_code == 302
+    assert app.recipes.get("steppy").steps == [
+        {"id": "s1", "action": "sear", "inputs": ["chicken"]},
+        {"id": "s2", "action": "simmer", "inputs": ["s1", "tomatoes"]},
+    ]
+
+
+def test_reordering_steps_needs_no_delimiter_syntax(client, app):
+    _write_recipe(app, "steppy.md", STEP_INGREDIENTS)
+    _login(client)
+
+    client.post(
+        "/recipes/steppy/steps",
+        data={
+            "step_row": ["a", "b"],
+            "step_action": ["sear", "simmer"],
+            "step_input__a": ["ingredient:chicken"],
+            "step_input__b": ["ingredient:tomatoes"],
+            "steps_source": "rows",
+        },
+    )
+
+    response = client.post(
+        "/recipes/steppy/steps",
+        data={
+            "step_row": ["b", "a"],
+            "step_action": ["simmer", "sear"],
+            "step_input__b": ["ingredient:tomatoes"],
+            "step_input__a": ["ingredient:chicken"],
+            "steps_source": "rows",
+        },
+    )
+
+    assert response.status_code == 302
+    assert [s["action"] for s in app.recipes.get("steppy").steps] == ["simmer", "sear"]
+
+
+def test_blank_step_row_is_dropped(client, app):
+    _write_recipe(app, "steppy.md", STEP_INGREDIENTS)
+    _login(client)
+
+    client.post(
+        "/recipes/steppy/steps",
+        data={
+            "step_row": ["a", "b"],
+            "step_action": ["sear", ""],
+            "step_input__a": ["ingredient:chicken"],
+            "steps_source": "rows",
+        },
+    )
+
+    assert [s["action"] for s in app.recipes.get("steppy").steps] == ["sear"]
+
+
+def test_selecting_a_later_step_in_the_picker_is_rejected(client, app):
+    """Simulates bypassing the picker's structural restriction (it only
+    ever offers earlier steps as choices) -- the server is the actual
+    safety net, not just the picker's option list."""
+    _write_recipe(app, "steppy.md", STEP_INGREDIENTS)
+    _login(client)
+
+    response = client.post(
+        "/recipes/steppy/steps",
+        data={
+            "step_row": ["a", "b"],
+            "step_action": ["sear", "simmer"],
+            "step_input__a": ["step:b"],
+            "step_input__b": ["ingredient:tomatoes"],
+            "steps_source": "rows",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "later" in response.data.decode()
+    assert app.recipes.get("steppy").steps == []
+
+
+def test_forward_reference_in_raw_text_is_rejected(client, app):
+    """Same validation, exercised via the Advanced escape hatch."""
+    _write_recipe(app, "steppy.md", STEP_INGREDIENTS)
+    _login(client)
+
+    response = client.post(
+        "/recipes/steppy/steps",
+        data={"steps": "s1 | prep | s2\ns2 | cook | chicken"},
+    )
+
+    assert response.status_code == 200
+    assert "later" in response.data.decode()
+    assert app.recipes.get("steppy").steps == []
+
+
+def test_moving_a_step_before_its_prerequisite_is_rejected(client, app):
+    """The plan's explicit scenario: move a step so it now sits before the
+    step it depends on. The bad attempt must not overwrite the last good
+    save."""
+    _write_recipe(app, "steppy.md", STEP_INGREDIENTS)
+    _login(client)
+
+    client.post(
+        "/recipes/steppy/steps",
+        data={
+            "step_row": ["a", "b"],
+            "step_action": ["sear", "simmer"],
+            "step_input__a": ["ingredient:chicken"],
+            "step_input__b": ["step:a", "ingredient:tomatoes"],
+            "steps_source": "rows",
+        },
+    )
+    assert [s["action"] for s in app.recipes.get("steppy").steps] == ["sear", "simmer"]
+
+    response = client.post(
+        "/recipes/steppy/steps",
+        data={
+            "step_row": ["b", "a"],
+            "step_action": ["simmer", "sear"],
+            "step_input__b": ["step:a", "ingredient:tomatoes"],
+            "step_input__a": ["ingredient:chicken"],
+            "steps_source": "rows",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "later" in response.data.decode()
+    assert [s["action"] for s in app.recipes.get("steppy").steps] == ["sear", "simmer"]
+
+
+def test_suggested_steps_populate_the_row_editor(client, app, monkeypatch):
+    import ai_extract
+
+    _write_recipe(app, "steppy.md", STEP_INGREDIENTS)
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_steps",
+        lambda name, ingredients, notes, api_key=None: [
+            {"id": "s1", "action": "sear the chicken", "inputs": ["chicken"]}
+        ],
+    )
+    _login(client)
+
+    body = client.post("/recipes/steppy/suggest-steps").data.decode()
+
+    assert 'value="sear the chicken"' in body
+    assert 'value="ingredient:chicken"' in body
+    assert app.recipes.get("steppy").steps == []
+
+
+def test_round_trip_row_ui_reconstructs_after_reload(client, app):
+    """Create steps via the row UI, save, reload the editor page, and
+    confirm it reconstructs from what's now on disk -- including the
+    second step's picker showing a real, checked reference to the first."""
+    _write_recipe(app, "steppy.md", STEP_INGREDIENTS)
+    _login(client)
+
+    client.post(
+        "/recipes/steppy/steps",
+        data={
+            "step_row": ["a", "b"],
+            "step_action": ["sear", "simmer"],
+            "step_input__a": ["ingredient:chicken"],
+            "step_input__b": ["step:a", "ingredient:tomatoes"],
+            "steps_source": "rows",
+        },
+    )
+
+    body = client.get("/recipes/steppy/steps").data.decode()
+
+    assert 'value="sear"' in body
+    assert 'value="simmer"' in body
+    assert "1. sear" in body
+    assert 'value="step:0"' in body
+
+
+def test_an_existing_unrecognized_step_reference_is_shown_not_dropped(client, app):
+    """A stray reference already on disk (nothing validated this before
+    this task existed) must stay visible for a human to notice and fix,
+    not vanish silently."""
+    _write_recipe(app, "legacy.md", LEGACY_STEP_REF)
+    _login(client)
+
+    body = client.get("/recipes/legacy/steps").data.decode()
+
+    assert "butter" in body
+    assert "not recognized" in body

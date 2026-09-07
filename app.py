@@ -714,10 +714,12 @@ def create_app():
     )
 
     def _parse_ingredient_lines(text):
-        """Parse the textarea format into ingredient dicts.
+        """Parse the `name | quantity | unit | flags` textarea format.
 
-        A plain-text box beats a dynamic add-a-row widget here: it pastes,
-        it dictates, and it is trivially editable.
+        This is the Advanced escape hatch (see `_parse_ingredient_rows` for
+        the ordinary-controls row editor that now fronts it): some users
+        still want to paste or bulk-edit, and a plain-text box beats a
+        dynamic add-a-row widget for that.
         """
         ingredients = []
         for line in (text or "").splitlines():
@@ -737,6 +739,51 @@ def create_app():
                 )
             )
         return ingredients
+
+    def _parse_ingredient_rows(form):
+        """Parse the row-editor's structured POST fields into ingredient dicts.
+
+        Each row is four parallel fields (`ingredient_row`/`_name`/`_quantity`/
+        `_unit`, one entry per row, in row order) plus two checkbox fields
+        (`ingredient_fresh`/`_staple`) whose *values* are the row ids of the
+        checked rows -- checkboxes don't submit when unchecked, so a flat
+        parallel list would lose alignment; keying by row id instead doesn't.
+        A row with no name is dropped, matching "only the name is required".
+        """
+        row_ids = form.getlist("ingredient_row")
+        names = form.getlist("ingredient_name")
+        quantities = form.getlist("ingredient_quantity")
+        units = form.getlist("ingredient_unit")
+        fresh_rows = set(form.getlist("ingredient_fresh"))
+        staple_rows = set(form.getlist("ingredient_staple"))
+
+        ingredients = []
+        for index, row_id in enumerate(row_ids):
+            name = names[index].strip() if index < len(names) else ""
+            if not name:
+                continue
+            quantity = quantities[index].strip() if index < len(quantities) else ""
+            unit = units[index].strip() if index < len(units) else ""
+            ingredients.append(
+                recipe_loader.normalize_ingredient(
+                    {
+                        "name": name,
+                        "quantity": quantity or None,
+                        "unit": unit or None,
+                        "fresh": row_id in fresh_rows,
+                        "staple": row_id in staple_rows,
+                    }
+                )
+            )
+        return ingredients
+
+    def _select_ingredients(form):
+        """Structured rows win unless the raw Advanced box was the one
+        actually edited (see `ingredients_source`, flipped by JS) or the
+        page has no row fields at all (an old-style raw-only POST)."""
+        if form.get("ingredients_source") != "advanced" and "ingredient_row" in form:
+            return _parse_ingredient_rows(form)
+        return _parse_ingredient_lines(form.get("ingredients"))
 
     @app.route("/recipes")
     @login_required
@@ -845,9 +892,10 @@ def create_app():
                 "name": parsed["name"],
                 "kind": parsed["kind"],
                 "serves": parsed["serves"] or "",
-                "ingredients": recipe_writer.ingredients_to_lines(parsed["ingredients"]),
                 "body": parsed["method"],
             },
+            ingredients=parsed["ingredients"],
+            ingredient_lines=recipe_writer.ingredients_to_lines(parsed["ingredients"]),
             from_paste=True,
             ingredient_help=_INGREDIENT_HELP,
             active="recipes",
@@ -858,11 +906,14 @@ def create_app():
     def recipe_new():
         if request.method == "POST":
             name = request.form.get("name", "").strip()
+            ingredients = _select_ingredients(request.form)
             if not name:
                 return render_template(
                     "recipe_form.html",
                     error="Give the recipe a name.",
                     form=request.form,
+                    ingredients=ingredients,
+                    ingredient_lines=recipe_writer.ingredients_to_lines(ingredients),
                     ingredient_help=_INGREDIENT_HELP,
                     active="recipes",
                 )
@@ -880,7 +931,7 @@ def create_app():
                 recipes_dir,
                 name=name,
                 frontmatter=frontmatter,
-                ingredients=_parse_ingredient_lines(request.form.get("ingredients")),
+                ingredients=ingredients,
                 body=request.form.get("body", ""),
             )
             app.recipes.reload()
@@ -890,15 +941,18 @@ def create_app():
             "recipe_form.html",
             error=None,
             form={},
+            ingredients=[],
+            ingredient_lines="",
             ingredient_help=_INGREDIENT_HELP,
             active="recipes",
         )
 
-    def _render_ingredient_editor(recipe, lines, error=None, suggested=False):
+    def _render_ingredient_editor(recipe, ingredients, error=None, suggested=False):
         return render_template(
             "recipe_ingredients.html",
             recipe=recipe,
-            lines=lines,
+            ingredients=ingredients,
+            lines=recipe_writer.ingredients_to_lines(ingredients),
             error=error,
             suggested=suggested,
             ingredient_help=_INGREDIENT_HELP,
@@ -949,24 +1003,27 @@ def create_app():
 
         if request.method == "POST":
             recipe_writer.set_ingredients(
-                recipes_dir,
-                slug,
-                _parse_ingredient_lines(request.form.get("ingredients")),
+                recipes_dir, slug, _select_ingredients(request.form)
             )
             app.recipes.reload()
             return redirect(url_for("recipe_detail", slug=slug))
 
-        return _render_ingredient_editor(
-            recipe, recipe_writer.ingredients_to_lines(recipe.ingredients)
-        )
+        return _render_ingredient_editor(recipe, recipe.ingredients)
 
     def _steps_to_lines(steps):
-        """Render steps as `id | action | input, input` for the editor."""
+        """Render steps as `id | action | input, input` for the Advanced box."""
         return "\n".join(
             f"{s['id']} | {s['action']} | {', '.join(s['inputs'])}" for s in steps or []
         )
 
     def _parse_step_lines(text):
+        """Parse the `id | action | inputs` textarea format.
+
+        This is the Advanced escape hatch. Unlike the row editor, ids here
+        are exactly what the human typed (or `s{line number}` if left
+        blank) -- ids are only auto-numbered by display order when they're
+        never typed at all, i.e. the row editor (see `_parse_step_rows`).
+        """
         steps = []
         for index, line in enumerate((text or "").splitlines(), start=1):
             if not line.strip():
@@ -985,11 +1042,120 @@ def create_app():
             )
         return recipe_loader.normalize_steps(steps)
 
-    def _render_step_editor(recipe, lines, error=None, suggested=False):
+    def _parse_step_rows(form):
+        """Parse the row-editor's structured POST fields into step dicts.
+
+        Each row is a `step_row` id plus a parallel `step_action`, in row
+        order -- that order *is* the display order, since browsers submit
+        repeated fields in document order. Ids are then assigned fresh as
+        s1, s2, ... by that order (see the module docstring in the task
+        brief this implements: the picker only ever offers earlier rows as
+        reference choices, so every reference is structurally guaranteed to
+        land on a lower-numbered id -- no cross-save id-preservation needed).
+
+        Each row's chosen inputs live in their own field, `step_input__<row
+        id>`, since a plain checkbox can't carry which row it belongs to.
+        A checked value is either `ingredient:<name>` (a literal ingredient
+        reference, passed through as-is -- including one that doesn't match
+        any current ingredient, so a stray/legacy reference isn't silently
+        dropped) or `step:<row id>` (translated below to that row's final
+        s-id). A row with neither an action nor any inputs is dropped, on
+        the theory that it's an empty row nobody used.
+        """
+        row_ids = form.getlist("step_row")
+        actions = form.getlist("step_action")
+
+        kept = []
+        for index, row_id in enumerate(row_ids):
+            action = actions[index].strip() if index < len(actions) else ""
+            raw_inputs = form.getlist(f"step_input__{row_id}")
+            if not action and not raw_inputs:
+                continue
+            kept.append((row_id, action, raw_inputs))
+
+        final_ids = {row_id: f"s{i + 1}" for i, (row_id, _, _) in enumerate(kept)}
+
+        steps = []
+        for row_id, action, raw_inputs in kept:
+            inputs = []
+            for raw in raw_inputs:
+                if raw.startswith("ingredient:"):
+                    name = raw[len("ingredient:"):]
+                    if name:
+                        inputs.append(name)
+                elif raw.startswith("step:"):
+                    target = final_ids.get(raw[len("step:"):])
+                    if target:
+                        inputs.append(target)
+            steps.append({"id": final_ids[row_id], "action": action, "inputs": inputs})
+        return recipe_loader.normalize_steps(steps)
+
+    def _select_steps(form):
+        """Structured rows win unless the raw Advanced box was the one
+        actually edited (see `steps_source`, flipped by JS) or the page has
+        no row fields at all (an old-style raw-only POST)."""
+        if form.get("steps_source") != "advanced" and "step_row" in form:
+            return _parse_step_rows(form)
+        return _parse_step_lines(form.get("steps"))
+
+    def _step_rows_for_editor(ingredients, steps):
+        """Build the picker's choices for each step row.
+
+        Row identity for the picker is just each step's position (0-based)
+        in `steps` -- stable for a single render, and all that's needed to
+        say "this row" versus "an earlier row" while building checkboxes.
+        For every row: one checkbox per current ingredient, one per earlier
+        row (labeled with its number and action), checked to match that
+        step's current `inputs` -- plus, for any input that matches
+        neither, an "orphan" checkbox so it's still visible and still
+        round-trips, rather than silently vanishing (this is how an
+        existing recipe with a stale/unmatched reference -- nothing
+        validated that before this task -- shows up for a human to notice
+        and fix, instead of disappearing off the page).
+        """
+        ingredient_names = [ing["name"] for ing in ingredients or []]
+        rows = []
+        for index, step in enumerate(steps or []):
+            remaining = list(step.get("inputs") or [])
+
+            ingredient_options = []
+            for name in ingredient_names:
+                checked = name in remaining
+                if checked:
+                    remaining.remove(name)
+                ingredient_options.append({"name": name, "checked": checked})
+
+            step_options = []
+            for earlier_index, earlier in enumerate(steps[:index]):
+                checked = earlier["id"] in remaining
+                if checked:
+                    remaining.remove(earlier["id"])
+                step_options.append(
+                    {
+                        "uid": str(earlier_index),
+                        "label": f"{earlier_index + 1}. {earlier['action'] or earlier['id']}",
+                        "checked": checked,
+                    }
+                )
+
+            rows.append(
+                {
+                    "uid": str(index),
+                    "action": step.get("action", ""),
+                    "ingredient_options": ingredient_options,
+                    "step_options": step_options,
+                    "orphans": remaining,
+                }
+            )
+        return rows
+
+    def _render_step_editor(recipe, steps, error=None, suggested=False):
         return render_template(
             "recipe_steps.html",
             recipe=recipe,
-            lines=lines,
+            steps=steps,
+            step_rows=_step_rows_for_editor(recipe.ingredients, steps),
+            lines=_steps_to_lines(steps),
             error=error,
             suggested=suggested,
             active="recipes",
@@ -1003,13 +1169,17 @@ def create_app():
             abort(404)
 
         if request.method == "POST":
-            recipe_writer.set_steps(
-                recipes_dir, slug, _parse_step_lines(request.form.get("steps"))
-            )
+            steps = _select_steps(request.form)
+            try:
+                recipe_loader.validate_step_order(steps)
+            except recipe_loader.StepOrderError as exc:
+                return _render_step_editor(recipe, steps, error=str(exc))
+
+            recipe_writer.set_steps(recipes_dir, slug, steps)
             app.recipes.reload()
             return redirect(url_for("recipe_detail", slug=slug))
 
-        return _render_step_editor(recipe, _steps_to_lines(recipe.steps))
+        return _render_step_editor(recipe, recipe.steps)
 
     @app.route("/recipes/<slug>/suggest-steps", methods=["POST"])
     @login_required
@@ -1018,13 +1188,12 @@ def create_app():
         if recipe is None:
             abort(404)
 
-        current = _steps_to_lines(recipe.steps)
         try:
             api_key = os.environ["HOMEHQ_ANTHROPIC_API_KEY"]
         except KeyError:
             return _render_step_editor(
                 recipe,
-                current,
+                recipe.steps,
                 error="AI generation isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY.",
             )
 
@@ -1033,9 +1202,9 @@ def create_app():
                 recipe.name, recipe.ingredients, recipe.body, api_key=api_key
             )
         except ai_extract.ExtractionError as exc:
-            return _render_step_editor(recipe, current, error=str(exc))
+            return _render_step_editor(recipe, recipe.steps, error=str(exc))
 
-        return _render_step_editor(recipe, _steps_to_lines(proposed), suggested=True)
+        return _render_step_editor(recipe, proposed, suggested=True)
 
     @app.route("/recipes/<slug>/suggest-ingredients", methods=["POST"])
     @login_required
@@ -1049,13 +1218,12 @@ def create_app():
         if recipe is None:
             abort(404)
 
-        current = recipe_writer.ingredients_to_lines(recipe.ingredients)
         try:
             api_key = os.environ["HOMEHQ_ANTHROPIC_API_KEY"]
         except KeyError:
             return _render_ingredient_editor(
                 recipe,
-                current,
+                recipe.ingredients,
                 error="AI extraction isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY.",
             )
 
@@ -1064,11 +1232,9 @@ def create_app():
                 recipe.name, recipe.body, api_key=api_key
             )
         except ai_extract.ExtractionError as exc:
-            return _render_ingredient_editor(recipe, current, error=str(exc))
+            return _render_ingredient_editor(recipe, recipe.ingredients, error=str(exc))
 
-        return _render_ingredient_editor(
-            recipe, recipe_writer.ingredients_to_lines(proposed), suggested=True
-        )
+        return _render_ingredient_editor(recipe, proposed, suggested=True)
 
     @app.route("/recipes/<slug>")
     @login_required

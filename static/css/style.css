@@ -1008,6 +1008,83 @@ details[open] > .disclosure__summary::after {
   margin-bottom: 0;
 }
 
+/* ---------- recipe row editors (ingredients/steps) ---------- */
+
+.editor-rows {
+  margin: 0 0 0.6rem;
+}
+
+.editor-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper-dim);
+  padding: 0.8rem 0.9rem 0.6rem;
+  margin-bottom: 0.7rem;
+}
+
+.editor-row .form-row {
+  margin-bottom: 0.2rem;
+}
+
+.editor-row .field {
+  margin-bottom: 0.6rem;
+}
+
+.editor-row__number {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 0 0 0.5rem;
+}
+
+.editor-row__flags {
+  display: flex;
+  gap: 1.2rem;
+  margin: 0 0 0.7rem;
+}
+
+.editor-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0.3rem 0 0.6rem;
+}
+
+/* Qualified with .picker rather than a bare .picker__option: these sit
+   inside a .field (for the "Uses" field group), and `.field label` (one
+   class plus a type selector, so higher specificity than a single class)
+   would otherwise win and force every option into the field-label look
+   (bold, ink-soft, uppercase-adjacent) meant for actual field labels like
+   "Name"/"Amount". */
+.picker .picker__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.picker .picker__option--orphan {
+  color: var(--rust);
+}
+
+.picker__empty {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  margin: 0.3rem 0 0.6rem;
+}
+
 /* Cooking For Engineers table: ingredients down the left, operations
    spanning the rows they consume. Scrolls sideways rather than squashing
    on a phone. */

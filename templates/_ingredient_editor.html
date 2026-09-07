@@ -1,0 +1,71 @@
+{# Shared by recipe_ingredients.html and recipe_form.html's ingredients
+   field -- same concept, same controls, so a user doesn't hit ordinary
+   controls in one place and raw syntax in another. Must be called from
+   inside a <form> that already posts to the right route; this macro only
+   emits fields, not a <form> of its own. #}
+{% macro ingredient_editor(ingredients, ingredient_lines, help_text) %}
+  <div class="editor-rows" id="ingredient-editor" data-js-ingredient-editor
+       data-raw-field="ingredients-raw" data-source-field="ingredients-source">
+    <input type="hidden" name="ingredients_source" id="ingredients-source" value="rows">
+    <div class="editor-rows__list">
+      {% for ingredient in ingredients %}
+        <div class="editor-row" data-row>
+          <input type="hidden" name="ingredient_row" value="{{ loop.index0 }}">
+          <div class="form-row">
+            <div class="field">
+              <label for="ingredient-name-{{ loop.index0 }}">Name</label>
+              <input id="ingredient-name-{{ loop.index0 }}" type="text" name="ingredient_name"
+                     value="{{ ingredient.name }}" required>
+            </div>
+            <div class="field">
+              <label for="ingredient-quantity-{{ loop.index0 }}">Amount</label>
+              <input id="ingredient-quantity-{{ loop.index0 }}" type="text" inputmode="decimal"
+                     name="ingredient_quantity"
+                     value="{{ '' if ingredient.quantity is none else ingredient.quantity }}">
+            </div>
+            <div class="field">
+              <label for="ingredient-unit-{{ loop.index0 }}">Unit</label>
+              <input id="ingredient-unit-{{ loop.index0 }}" type="text" name="ingredient_unit"
+                     value="{{ ingredient.unit or '' }}">
+            </div>
+          </div>
+          <div class="editor-row__flags">
+            <label class="check">
+              <input type="checkbox" name="ingredient_fresh" value="{{ loop.index0 }}"
+                     {{ 'checked' if ingredient.fresh else '' }}>
+              Fresh
+            </label>
+            <label class="check">
+              <input type="checkbox" name="ingredient_staple" value="{{ loop.index0 }}"
+                     {{ 'checked' if ingredient.staple else '' }}>
+              Staple
+            </label>
+          </div>
+          <div class="editor-row__actions">
+            <button type="button" class="btn btn--sm btn--ghost js-row-up">Move up</button>
+            <button type="button" class="btn btn--sm btn--ghost js-row-down">Move down</button>
+            <button type="button" class="btn btn--sm btn--ghost js-row-remove">Remove</button>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="btn btn--sm js-row-add">Add ingredient</button>
+  </div>
+
+  <p class="field__help">
+    <strong>Fresh</strong> &mdash; produce, dairy, fresh meat. Always added to the shopping
+    list, because the pantry doesn't track fresh goods and "we have it" isn't the same as
+    "it's still good". <strong>Staple</strong> &mdash; spices and cupboard basics you always
+    have. Keeps meal plans from asking about cumin every time.
+  </p>
+
+  <details class="disclosure">
+    <summary class="disclosure__summary">Advanced: edit as raw text</summary>
+    <div class="field">
+      <label for="ingredients-raw">One ingredient per line</label>
+      <textarea id="ingredients-raw" name="ingredients" rows="8"
+                placeholder="ground beef | 1 | lb | fresh&#10;cumin | 2 | tsp | staple&#10;kidney beans | 1 | can">{{ ingredient_lines }}</textarea>
+      <span class="field__help">{{ help_text }}</span>
+    </div>
+  </details>
+{% endmacro %}
