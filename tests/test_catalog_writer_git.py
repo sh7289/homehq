@@ -175,3 +175,51 @@ def test_nothing_to_commit_is_not_treated_as_a_failure(tmp_path):
     git_commit_and_push(str(tmp_path), "Add item", github_token="t", runner=fake_runner)
 
     assert not any("push" in c for c in calls), "nothing committed, so nothing to push"
+
+
+def test_rebases_onto_the_remote_before_pushing(tmp_path):
+    """The server commits on its own while development pushes land from a
+    laptop, so its branch drifts behind and a plain push is rejected as
+    non-fast-forward. That is what has been failing all along."""
+    from catalog_writer import git_commit_and_push
+
+    calls = []
+    git_commit_and_push(
+        str(tmp_path),
+        "Add item",
+        github_token="fake-token",
+        runner=_runner_with_origin(calls, "git@github.com:sh7289/homehq.git"),
+    )
+
+    commands = [c[0] for c in calls]
+    verbs = [c[1] for c in commands if len(c) > 1]
+    assert "fetch" in verbs
+    assert "rebase" in verbs
+    fetch_at = next(i for i, c in enumerate(commands) if c[1] == "fetch")
+    push_at = next(i for i, c in enumerate(commands) if "push" in c)
+    assert fetch_at < push_at, "fetch/rebase must happen before the push"
+
+
+def test_a_rebase_conflict_aborts_and_keeps_the_commit(tmp_path):
+    import subprocess
+
+    from catalog_writer import PushFailed, git_commit_and_push
+
+    calls = []
+
+    def fake_runner(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:3] == ["git", "remote", "get-url"]:
+            return _FakeUrlResult("git@github.com:sh7289/homehq.git\n")
+        if cmd[:2] == ["git", "rebase"] and "--abort" not in cmd:
+            raise subprocess.CalledProcessError(1, cmd, stderr="CONFLICT in content/x.md")
+        return _FakeUrlResult()
+
+    try:
+        git_commit_and_push(str(tmp_path), "Add item", github_token="t", runner=fake_runner)
+        raise AssertionError("expected PushFailed")
+    except PushFailed as exc:
+        assert "conflict" in str(exc).lower()
+
+    assert ["git", "rebase", "--abort"] in calls, "must not leave a rebase in progress"
+    assert not any("push" in c for c in calls), "do not push a half-rebased branch"

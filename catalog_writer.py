@@ -209,6 +209,35 @@ def git_commit_and_push(repo_dir, message, github_token, branch="main", runner=s
             return
         raise
 
+    # The branch drifts behind whenever development commits are pushed from
+    # elsewhere, and a plain push is then rejected as non-fast-forward. Rebase
+    # this commit on top of the remote first. Fetching uses `origin` (the
+    # read-only deploy key is enough to read); only the push needs the token.
+    try:
+        runner(
+            ["git", "fetch", "origin", branch],
+            cwd=repo_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        runner(
+            ["git", "rebase", f"origin/{branch}"],
+            cwd=repo_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        # Leave no rebase in progress: the next approve would fail on it.
+        runner(["git", "rebase", "--abort"], cwd=repo_dir, check=False)
+        detail = (getattr(exc, "stderr", "") or "").strip().replace("\n", " ")
+        raise PushFailed(
+            "Committed locally, but could not reconcile with GitHub, so nothing "
+            "was pushed. The item is saved on the server. This usually means a "
+            f"conflict needing a human. git said: {detail or 'no output'}"
+        ) from exc
+
     push_url = push_url_for(_origin_url(repo_dir, runner))
     askpass_path = _make_askpass_script(github_token)
     try:
