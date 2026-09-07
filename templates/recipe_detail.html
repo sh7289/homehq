@@ -1,106 +1,164 @@
 {% extends "base.html" %}
 {% block title %}{{ recipe.name }} – Home HQ{% endblock %}
 {% block content %}
-  <div class="card card--prose">
+  <div class="card card--prose card--recipe" id="recipe-root">
     <h1 class="card__title">{{ recipe.name }}</h1>
     <hr class="card__rule">
-    <p class="card__meta">
-      {{ recipe.kind|titlecase }}
-      {% if recipe.frontmatter.category %} &middot; {{ recipe.frontmatter.category }}{% endif %}
-      {% if recipe.frontmatter.protein %} &middot; {{ recipe.frontmatter.protein }}{% endif %}
-      {% if recipe.frontmatter.season %} &middot; {{ recipe.frontmatter.season }}{% endif %}
-      {% if recipe.frontmatter.leftovers %} &middot; leftovers: {{ recipe.frontmatter.leftovers }}{% endif %}
-      {% if recipe.frontmatter.freezer_friendly %} &middot; freezer: {{ recipe.frontmatter.freezer_friendly }}{% endif %}
-      {% if recipe.frontmatter.garden_herbs %} &middot; herbs: {{ recipe.frontmatter.garden_herbs }}{% endif %}
-      {% if recipe.cuisine %} &middot; {{ recipe.cuisine|titlecase }}{% endif %}
-      {% if recipe.effort %} &middot; effort {{ recipe.effort }}/5{% endif %}
-      {% if recipe.frontmatter.active_minutes %} &middot; {{ recipe.frontmatter.active_minutes }} min active{% endif %}
-      {% if recipe.frontmatter.total_minutes %} &middot; {{ recipe.frontmatter.total_minutes }} min total{% endif %}
-      {% if shown_serves %} &middot; serves {{ shown_serves }}{% endif %}
-      {% if recipe.is_favorite %} &middot; favorite{% endif %}
-    </p>
 
-    <span class="eyebrow">
-      Ingredients
-      {% if scaled %}&middot; scaled from {{ base_serves }}{% endif %}
-    </span>
+    {% set has_stats = shown_serves or recipe.effort or recipe.frontmatter.active_minutes or recipe.frontmatter.total_minutes %}
+    {% if has_stats %}
+      <div class="recipe-stats">
+        {% if shown_serves %}
+          <div class="recipe-stat"><span class="recipe-stat__value">serves {{ shown_serves }}</span></div>
+        {% endif %}
+        {% if recipe.effort %}
+          <div class="recipe-stat"><span class="recipe-stat__value">effort {{ recipe.effort }}/5</span></div>
+        {% endif %}
+        {% if recipe.frontmatter.active_minutes %}
+          <div class="recipe-stat"><span class="recipe-stat__value">{{ recipe.frontmatter.active_minutes }} min active</span></div>
+        {% endif %}
+        {% if recipe.frontmatter.total_minutes %}
+          <div class="recipe-stat"><span class="recipe-stat__value">{{ recipe.frontmatter.total_minutes }} min total</span></div>
+        {% endif %}
+      </div>
+    {% endif %}
 
+    <details class="disclosure recipe-meta-more">
+      <summary class="disclosure__summary">More about this recipe</summary>
+      <p class="card__meta">
+        {{ recipe.kind|titlecase }}
+        {% if recipe.frontmatter.category %} &middot; {{ recipe.frontmatter.category }}{% endif %}
+        {% if recipe.frontmatter.protein %} &middot; {{ recipe.frontmatter.protein }}{% endif %}
+        {% if recipe.frontmatter.season %} &middot; {{ recipe.frontmatter.season }}{% endif %}
+        {% if recipe.frontmatter.leftovers %} &middot; leftovers: {{ recipe.frontmatter.leftovers }}{% endif %}
+        {% if recipe.frontmatter.freezer_friendly %} &middot; freezer: {{ recipe.frontmatter.freezer_friendly }}{% endif %}
+        {% if recipe.frontmatter.garden_herbs %} &middot; herbs: {{ recipe.frontmatter.garden_herbs }}{% endif %}
+        {% if recipe.cuisine %} &middot; {{ recipe.cuisine|titlecase }}{% endif %}
+        {% if recipe.is_favorite %} &middot; favorite{% endif %}
+        {% if recipe.frontmatter.source %} &middot; <a href="{{ recipe.frontmatter.source }}">Source</a>{% endif %}
+      </p>
+    </details>
+
+    {# Mobile-only jump nav -- desktop shows ingredients/method side by side
+       (see .recipe-layout below), so there's nothing to jump to there. #}
+    <nav class="jump-nav no-print" aria-label="Jump to section">
+      <a href="#ingredients">Ingredients</a>
+      <a href="#method">Method</a>
+    </nav>
+
+    <div class="recipe-toolbar no-print">
+      <button type="button" class="btn btn--sm" id="cook-mode-toggle" aria-pressed="false">Cook mode</button>
+
+      <div class="edit-menu">
+        <button type="button" class="btn btn--sm btn--ghost js-edit-toggle" data-target="edit-menu-panel"
+                aria-controls="edit-menu-panel" aria-expanded="false">Edit</button>
+        <div class="edit-panel edit-menu__panel" id="edit-menu-panel" hidden>
+          <a class="btn btn--sm" href="{{ url_for('recipe_ingredients', slug=recipe.slug) }}">
+            {% if recipe.ingredients %}Edit ingredients{% else %}Add ingredients{% endif %}
+          </a>
+          {% if recipe.steps %}
+            <a class="btn btn--sm" href="{{ url_for('recipe_steps_edit', slug=recipe.slug) }}">Edit steps</a>
+          {% else %}
+            <a class="btn btn--sm" href="{{ url_for('recipe_steps_edit', slug=recipe.slug) }}">Add steps</a>
+          {% endif %}
+          <a class="btn btn--sm" href="{{ url_for('recipe_edit', slug=recipe.slug) }}">Edit recipe &amp; notes</a>
+        </div>
+      </div>
+    </div>
+
+    {# A direct child of the card (not of .recipe-layout__ingredients) so
+       that in Cook mode this can stick for as long as any part of the card
+       -- ingredients through the last method step -- is on screen, rather
+       than only for as long as the (usually much shorter) ingredients list
+       is; see .is-cooking .scale-bar in style.css. #}
     {% if base_serves %}
-      <p class="scale-bar">
+      <p class="scale-bar no-print">
         Scale to:
         {% for n in scale_choices %}
-          <a href="{{ url_for('recipe_detail', slug=recipe.slug, serves=n) }}"
+          <a href="{{ url_for('recipe_detail', slug=recipe.slug, serves=n, view=view) }}"
              class="{{ 'is-active' if shown_serves == n else '' }}">{{ n }}</a>
         {% endfor %}
       </p>
     {% endif %}
 
-    <ul class="rows">
-      {% for ingredient in ingredients %}
-        <li class="row">
-          <span class="row__name">{{ ingredient.name }}</span>
-          {%- set amount = [] -%}
-          {%- if ingredient.quantity %}{{- amount.append(ingredient.quantity) or '' -}}{% endif -%}
-          {%- if ingredient.unit %}{{- amount.append(ingredient.unit) or '' -}}{% endif -%}
-          <span class="row__meta">{{ amount|join(' ') }}</span>
-          {% if ingredient.fresh %}
-            <span class="tag-fresh" title="Always added to the shopping list — the pantry doesn't track fresh goods">Fresh</span>
-          {% elif ingredient.staple %}
-            <span class="tag-staple" title="Assumed on hand unless the pantry says otherwise">Staple</span>
-          {% endif %}
-        </li>
-      {% else %}
-        <li class="row">No ingredients recorded — nothing downstream (shopping lists, meal plans) can use this recipe until they're added.</li>
-      {% endfor %}
-    </ul>
-    <a class="btn btn--sm" href="{{ url_for('recipe_ingredients', slug=recipe.slug) }}">
-      {% if recipe.ingredients %}Edit ingredients{% else %}Add ingredients{% endif %}
-    </a>
+    <div class="recipe-layout">
+      <section class="recipe-layout__ingredients" id="ingredients">
+        <span class="eyebrow">
+          Ingredients
+          {% if scaled %}&middot; scaled from {{ base_serves }}{% endif %}
+        </span>
 
-    {% if recipe.steps %}
-      <span class="eyebrow">
-        Method
-        <a href="{{ url_for('recipe_detail', slug=recipe.slug, serves=shown_serves if scaled else None) }}">list</a> /
-        <a href="{{ url_for('recipe_detail', slug=recipe.slug, view='table', serves=shown_serves if scaled else None) }}">table</a>
-      </span>
-
-      {% if view == 'table' and table %}
-        {# Cooking For Engineers layout: ingredients down the left, each
-           operation spanning the rows of everything it consumes. #}
-        <div class="cfe-wrap">
-          <table class="cfe">
-            {% for row in table.rows %}
-              <tr>
-                <th scope="row">
-                  {{ row.ingredient.name }}
-                  {%- set amount = [] -%}
-                  {%- if row.ingredient.quantity %}{{- amount.append(row.ingredient.quantity) or '' -}}{% endif -%}
-                  {%- if row.ingredient.unit %}{{- amount.append(row.ingredient.unit) or '' -}}{% endif -%}
-                  {% if amount %}<span class="cfe__amount">{{ amount|join(' ') }}</span>{% endif %}
-                </th>
-                {% for cell in row.cells %}
-                  <td rowspan="{{ cell.rowspan }}" class="{{ 'cfe__gap' if cell.spacer else '' }}">{{ cell.action }}</td>
-                {% endfor %}
-              </tr>
-            {% endfor %}
-          </table>
-        </div>
-      {% else %}
-        <ol class="method">
-          {% for line in method %}
-            <li>{{ line.split('. ', 1)[1] if '. ' in line else line }}</li>
+        <ul class="rows cook-list">
+          {% for ingredient in ingredients %}
+            <li class="row cook-row">
+              <input type="checkbox" class="cook-check no-print" id="ing-check-{{ loop.index }}"
+                     aria-label="Mark {{ ingredient.name }} as done">
+              <label for="ing-check-{{ loop.index }}" class="row__name">{{ ingredient.name }}</label>
+              {%- set amount = [] -%}
+              {%- if ingredient.quantity %}{{- amount.append(ingredient.quantity) or '' -}}{% endif -%}
+              {%- if ingredient.unit %}{{- amount.append(ingredient.unit) or '' -}}{% endif -%}
+              <span class="row__meta">{{ amount|join(' ') }}</span>
+              {% if ingredient.fresh %}
+                <span class="tag-fresh" title="Always added to the shopping list — the pantry doesn't track fresh goods">Fresh</span>
+              {% elif ingredient.staple %}
+                <span class="tag-staple" title="Assumed on hand unless the pantry says otherwise">Staple</span>
+              {% endif %}
+            </li>
+          {% else %}
+            <li class="row">No ingredients recorded — nothing downstream (shopping lists, meal plans) can use this recipe until they're added.</li>
           {% endfor %}
-        </ol>
-      {% endif %}
+        </ul>
+      </section>
 
-      <a class="btn btn--sm" href="{{ url_for('recipe_steps_edit', slug=recipe.slug) }}">Edit steps</a>
-    {% else %}
-      <span class="eyebrow">Method</span>
-      <p class="card__meta">
-        No steps recorded.
-        <a href="{{ url_for('recipe_steps_edit', slug=recipe.slug) }}">Write them, or have them drafted from your notes.</a>
-      </p>
-    {% endif %}
+      <section class="recipe-layout__method" id="method">
+        {% if recipe.steps %}
+          <span class="eyebrow">
+            Method
+            <a href="{{ url_for('recipe_detail', slug=recipe.slug, serves=shown_serves if scaled else None) }}">list</a> /
+            <a href="{{ url_for('recipe_detail', slug=recipe.slug, view='table', serves=shown_serves if scaled else None) }}">table</a>
+          </span>
+
+          {% if view == 'table' and table %}
+            {# Cooking For Engineers layout: ingredients down the left, each
+               operation spanning the rows of everything it consumes. #}
+            <div class="cfe-wrap">
+              <table class="cfe">
+                {% for row in table.rows %}
+                  <tr>
+                    <th scope="row">
+                      {{ row.ingredient.name }}
+                      {%- set amount = [] -%}
+                      {%- if row.ingredient.quantity %}{{- amount.append(row.ingredient.quantity) or '' -}}{% endif -%}
+                      {%- if row.ingredient.unit %}{{- amount.append(row.ingredient.unit) or '' -}}{% endif -%}
+                      {% if amount %}<span class="cfe__amount">{{ amount|join(' ') }}</span>{% endif %}
+                    </th>
+                    {% for cell in row.cells %}
+                      <td rowspan="{{ cell.rowspan }}" class="{{ 'cfe__gap' if cell.spacer else '' }}">{{ cell.action }}</td>
+                    {% endfor %}
+                  </tr>
+                {% endfor %}
+              </table>
+            </div>
+          {% else %}
+            <ol class="method cook-list">
+              {% for line in method %}
+                <li class="cook-row">
+                  <input type="checkbox" class="cook-check no-print" id="step-check-{{ loop.index }}"
+                         aria-label="Mark step {{ loop.index }} as done">
+                  <label for="step-check-{{ loop.index }}">{{ line.split('. ', 1)[1] if '. ' in line else line }}</label>
+                </li>
+              {% endfor %}
+            </ol>
+          {% endif %}
+        {% else %}
+          <span class="eyebrow">Method</span>
+          <p class="card__meta">
+            No steps recorded.
+            <a href="{{ url_for('recipe_steps_edit', slug=recipe.slug) }}">Write them, or have them drafted from your notes.</a>
+          </p>
+        {% endif %}
+      </section>
+    </div>
 
     {% if recipe.body %}
       <span class="eyebrow">Notes</span>
@@ -111,11 +169,8 @@
       </div>
     {% endif %}
 
-    {% if recipe.frontmatter.source %}
-      <p class="card__meta"><a href="{{ recipe.frontmatter.source }}">Source</a></p>
-    {% endif %}
-
-    <a class="btn btn--sm" href="{{ url_for('recipe_edit', slug=recipe.slug) }}">Edit recipe &amp; notes</a>
-    <a class="btn btn--ghost" href="{{ url_for('recipes') }}">Back to recipes</a>
+    <a class="btn btn--ghost no-print" href="{{ url_for('recipes') }}">Back to recipes</a>
   </div>
+
+  <script src="{{ url_for('static', filename='js/recipe-cook.js') }}"></script>
 {% endblock %}

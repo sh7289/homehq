@@ -1008,6 +1008,145 @@ details[open] > .disclosure__summary::after {
   margin-bottom: 0;
 }
 
+/* ---------- recipe detail: stats, side-by-side layout, cook mode ---------- */
+/* Task 4: pull servings/effort/time out of the run-on meta line into their
+   own visually distinct row; the rest of the frontmatter (category, protein,
+   season, leftovers, freezer_friendly, garden_herbs, cuisine, favorite,
+   source) is secondary and lives in the "More about this recipe" disclosure
+   below it -- same native <details>/<summary> pattern as .disclosure
+   elsewhere, just re-labelled here for this page's own copy. */
+
+.card--recipe {
+  max-width: var(--prose-max-width);
+}
+
+@media (min-width: 860px) {
+  /* Wider than the shared prose cap so ingredients and method have room to
+     sit side by side (see .recipe-layout below) without either column
+     feeling squeezed. */
+  .card--recipe {
+    max-width: 880px;
+  }
+}
+
+.recipe-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.4rem;
+  margin: 0 0 0.2rem;
+}
+
+.recipe-stat__value {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  color: var(--ink);
+}
+
+.recipe-meta-more {
+  margin-bottom: 0.4rem;
+}
+
+.recipe-meta-more .card__meta {
+  margin: 0.3rem 0 0;
+}
+
+/* Mobile-only jump nav -- the desktop grid below puts ingredients and
+   method side by side, so there's nothing to jump to there. */
+.jump-nav {
+  display: flex;
+  gap: 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 0 0 1.1rem;
+}
+
+.recipe-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.6rem 0.8rem;
+  margin: 0 0 1.5rem;
+}
+
+.edit-menu {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.edit-menu__panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.recipe-layout {
+  display: block;
+}
+
+@media (min-width: 860px) {
+  .jump-nav {
+    display: none;
+  }
+
+  .recipe-layout {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(0, 1.6fr);
+    gap: 0 2.2rem;
+    align-items: start;
+  }
+}
+
+/* ---------- cook mode ---------- */
+/* A plain `.is-cooking` class toggled on #recipe-root by recipe-cook.js.
+   Ingredient/step checkmarks are native checkboxes already in the markup
+   (hidden here, revealed once cooking) -- checking one off is pure CSS
+   (`.cook-check:checked + label`), no JS involved in the checkmark itself,
+   and nothing here is ever submitted to the server. */
+
+.cook-check {
+  display: none;
+}
+
+.is-cooking .cook-check {
+  display: inline-block;
+  width: 1.2rem;
+  height: 1.2rem;
+  margin: 0 0.6rem 0 0;
+  vertical-align: middle;
+  accent-color: var(--teal);
+}
+
+.cook-check:checked + label {
+  text-decoration: line-through;
+  color: var(--ink-soft);
+}
+
+.is-cooking .method {
+  font-size: 1.2rem;
+  line-height: 1.7;
+}
+
+.is-cooking .method li {
+  margin-bottom: 1rem;
+}
+
+/* Persistent servings control while cooking: the scale-bar sticks to the
+   top of the viewport instead of scrolling away with the ingredients. */
+.is-cooking .scale-bar {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 3;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.6rem;
+}
+
 /* ---------- recipe row editors (ingredients/steps) ---------- */
 
 .editor-rows {
@@ -1441,6 +1580,26 @@ details[open] > .disclosure__summary::after {
   .card {
     box-shadow: none;
     border-radius: 0;
+  }
+
+  /* Recipe printing (Task 4): ingredients and method, nothing else. The
+     side-by-side desktop grid and Cook mode's enlarged type are both
+     screen-only conveniences -- print always falls back to one plain
+     column, and .no-print (already applied above to the jump nav, toolbar,
+     scale-bar and every cook-check) strips the rest of the page's chrome
+     regardless of whether Cook mode happened to be on when this was
+     printed. */
+  .card--recipe {
+    max-width: none;
+  }
+
+  .recipe-layout {
+    display: block;
+  }
+
+  .is-cooking .method {
+    font-size: inherit;
+    line-height: inherit;
   }
 }
 

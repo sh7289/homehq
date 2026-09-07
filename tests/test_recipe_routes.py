@@ -1,4 +1,5 @@
 import os
+import re
 
 
 def _login(client):
@@ -308,7 +309,7 @@ def test_detail_shows_a_numbered_method_from_steps(client, app):
     body = client.get("/recipes/stepped").data.decode()
 
     assert "sear the chicken" in body
-    assert "<ol class=\"method\">" in body
+    assert '<ol class="method cook-list">' in body
 
 
 def test_table_view_renders_spanning_cells(client, app):
@@ -330,12 +331,123 @@ def test_table_view_keeps_the_scaled_amounts(client, app):
     assert "2 lb" in body
 
 
+def _href_containing(body, needle):
+    """Find the href of a link containing `needle`, with HTML entities
+    un-escaped (Jinja autoescapes `&` to `&amp;` in query strings)."""
+    match = re.search(r'href="([^"]*' + re.escape(needle) + r'[^"]*)"', body)
+    assert match, f"no link containing {needle!r} found"
+    return match.group(1).replace("&amp;", "&")
+
+
+def test_scale_bar_preserves_the_table_view(client, app):
+    """Confirmed bug: switching servings while viewing the table must not
+    silently drop back to the list view."""
+    _write_recipe(app, "stepped.md", STEPPED)
+    _login(client)
+
+    body = client.get("/recipes/stepped?view=table").data.decode()
+
+    href = _href_containing(body, "serves=1")
+    assert "view=table" in href
+
+
+def test_list_table_links_still_preserve_serves(client, app):
+    """Already correct before this task -- guard against regressing it
+    while fixing the scale-bar side."""
+    _write_recipe(app, "stepped.md", STEPPED)
+    _login(client)
+
+    body = client.get("/recipes/stepped?serves=4").data.decode()
+
+    href = _href_containing(body, "view=table")
+    assert "serves=4" in href
+
+
+def test_scale_bar_omits_view_when_list_is_active(client, app):
+    """The list view is the default (no `view` param); scaling from it
+    should not introduce a stray `view=None` in the link."""
+    _write_recipe(app, "stepped.md", STEPPED)
+    _login(client)
+
+    body = client.get("/recipes/stepped").data.decode()
+
+    href = _href_containing(body, "serves=1")
+    assert "view=" not in href
+
+
+def test_recipe_toolbar_and_scale_bar_are_marked_no_print(client, app):
+    """Print stylesheet (static/css/style.css `@media print`) hides every
+    `.no-print` element -- this only checks the markup carries that class on
+    the chrome the brief calls out (nav/edit links/scale-bar/cook controls);
+    the print CSS rules themselves are simple enough to verify by reading
+    style.css directly."""
+    _write_recipe(app, "stepped.md", STEPPED)
+    _login(client)
+
+    body = client.get("/recipes/stepped").data.decode()
+
+    assert 'class="jump-nav no-print"' in body
+    assert 'class="recipe-toolbar no-print"' in body
+    assert 'class="scale-bar no-print"' in body
+    assert 'class="cook-check no-print"' in body
+    assert 'class="btn btn--ghost no-print"' in body
+
+
+def test_edit_links_are_grouped_in_one_edit_menu(client, app):
+    _write_recipe(app, "stepped.md", STEPPED)
+    _login(client)
+
+    body = client.get("/recipes/stepped").data.decode()
+
+    panel = re.search(
+        r'<div class="edit-panel edit-menu__panel" id="edit-menu-panel" hidden>(.*?)</div>',
+        body,
+        re.DOTALL,
+    )
+    assert panel, "edit menu panel not found"
+    contents = panel.group(1)
+    assert "Edit ingredients" in contents
+    assert "Edit steps" in contents
+    assert "Edit recipe &amp; notes" in contents
+
+
+def test_cook_mode_toggle_and_checkmarks_are_client_side_only(client, app):
+    """Cook mode must never wire up an inventory-mutating endpoint -- the
+    ingredient/step checkboxes have no `name` attribute, so unlike every
+    other form control in this app they can't be submitted at all."""
+    _write_recipe(app, "stepped.md", STEPPED)
+    _login(client)
+
+    body = client.get("/recipes/stepped").data.decode()
+
+    assert 'id="cook-mode-toggle"' in body
+    assert re.search(r'<input type="checkbox" class="cook-check no-print"[^>]*>', body)
+    assert 'name="cook' not in body
+    assert 'name="check' not in body
+
+
 def test_a_recipe_without_steps_offers_to_draft_them(client, app):
     _write_recipe(app, "tinga.md", TINGA)
     _login(client)
 
     body = client.get("/recipes/tinga").data.decode()
 
+    assert "No steps recorded" in body
+
+
+def test_a_recipe_without_steps_still_renders_cook_mode_controls(client, app):
+    """Cook mode must degrade sensibly (not error) when there's nothing to
+    step through -- ingredients are still checkable, and the method section
+    just keeps its existing "no steps" message."""
+    _write_recipe(app, "tinga.md", TINGA)
+    _login(client)
+
+    response = client.get("/recipes/tinga")
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert 'id="cook-mode-toggle"' in body
+    assert 'class="cook-check no-print"' in body  # from the ingredient rows
     assert "No steps recorded" in body
 
 
