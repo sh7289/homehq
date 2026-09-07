@@ -512,3 +512,121 @@ def test_paste_reports_an_extraction_failure(client, app, monkeypatch):
 
     assert response.status_code == 200
     assert b"not valid JSON" in response.data
+
+
+EDITABLE = """---
+name: Editable
+kind: meal
+category: Mexican
+serves: 2
+effort: 3
+favorite: true
+ingredients:
+  - {name: chicken, quantity: 1, unit: lb, fresh: true}
+steps:
+  - {id: s1, action: sear, inputs: [chicken]}
+---
+Original notes that should be editable.
+"""
+
+
+def test_edit_page_requires_login(client):
+    response = client.get("/recipes/editable/edit")
+
+    assert response.status_code == 302
+    assert "/login" in response.headers["Location"]
+
+
+def test_edit_page_prefills_the_current_values(client, app):
+    _write_recipe(app, "editable.md", EDITABLE)
+    _login(client)
+
+    body = client.get("/recipes/editable/edit").data.decode()
+
+    assert "Editable" in body
+    assert "Original notes that should be editable." in body
+    assert "Mexican" in body
+
+
+def test_editing_saves_the_notes_and_metadata(client, app):
+    _write_recipe(app, "editable.md", EDITABLE)
+    _login(client)
+
+    response = client.post(
+        "/recipes/editable/edit",
+        data={
+            "name": "Renamed",
+            "kind": "side",
+            "category": "Italian",
+            "serves": "4",
+            "effort": "1",
+            "body": "Rewritten notes.",
+        },
+    )
+
+    assert response.status_code == 302
+    r = app.recipes.get("editable")
+    assert r.name == "Renamed"
+    assert r.kind == "side"
+    assert r.frontmatter["category"] == "Italian"
+    assert r.frontmatter["serves"] == 4
+    assert r.body == "Rewritten notes."
+
+
+def test_editing_preserves_ingredients_and_steps(client, app):
+    """The notes are only one part of the file; structuring work must survive."""
+    _write_recipe(app, "editable.md", EDITABLE)
+    _login(client)
+
+    client.post(
+        "/recipes/editable/edit",
+        data={"name": "Editable", "kind": "meal", "body": "New notes."},
+    )
+
+    r = app.recipes.get("editable")
+    assert [i["name"] for i in r.ingredients] == ["chicken"]
+    assert r.ingredients[0]["quantity"] == 1
+    assert [s["action"] for s in r.steps] == ["sear"]
+
+
+def test_notes_can_be_cleared_entirely(client, app):
+    """Once steps are drafted the original prose is redundant."""
+    _write_recipe(app, "editable.md", EDITABLE)
+    _login(client)
+
+    client.post(
+        "/recipes/editable/edit",
+        data={"name": "Editable", "kind": "meal", "body": "   "},
+    )
+
+    r = app.recipes.get("editable")
+    assert r.body == ""
+    assert r.steps, "clearing notes must not take the steps with them"
+
+
+def test_unfavouriting_works(client, app):
+    """A checkbox that is unchecked sends nothing, so absence must mean false."""
+    _write_recipe(app, "editable.md", EDITABLE)
+    _login(client)
+
+    client.post(
+        "/recipes/editable/edit",
+        data={"name": "Editable", "kind": "meal", "body": "x"},
+    )
+
+    assert app.recipes.get("editable").is_favorite is False
+
+
+def test_editing_an_unknown_recipe_404s(client, app):
+    _login(client)
+
+    assert client.get("/recipes/nope/edit").status_code == 404
+
+
+def test_detail_page_links_to_the_editor(client, app):
+    _write_recipe(app, "editable.md", EDITABLE)
+    _login(client)
+
+    body = client.get("/recipes/editable").data.decode()
+
+    assert "/recipes/editable/edit" in body

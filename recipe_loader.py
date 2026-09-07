@@ -127,7 +127,9 @@ def _parse_file(path):
     if not isinstance(frontmatter, dict):
         raise ValueError("frontmatter did not parse to a mapping")
 
-    name = frontmatter.get("name")
+    # Popped, not read: leaving it behind means a rename writes the frontmatter
+    # copy back over the new name.
+    name = frontmatter.pop("name", None)
     if not name:
         raise ValueError("recipe is missing required 'name' field")
 

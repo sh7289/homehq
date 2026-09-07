@@ -118,6 +118,7 @@
       <p class="card__meta"><a href="{{ recipe.frontmatter.source }}">Source</a></p>
     {% endif %}
 
+    <a class="btn btn--sm" href="{{ url_for('recipe_edit', slug=recipe.slug) }}">Edit recipe &amp; notes</a>
     <a class="btn btn--ghost" href="{{ url_for('recipes') }}">Back to recipes</a>
   </div>
 {% endblock %}

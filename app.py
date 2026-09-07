@@ -659,6 +659,41 @@ def create_app():
             active="recipes",
         )
 
+    @app.route("/recipes/<slug>/edit", methods=["GET", "POST"])
+    @login_required
+    def recipe_edit(slug):
+        recipe = app.recipes.get(slug)
+        if recipe is None:
+            abort(404)
+
+        if request.method == "POST":
+            effort = request.form.get("effort", "").strip()
+            serves = request.form.get("serves", "").strip()
+            frontmatter = dict(recipe.frontmatter)
+            frontmatter.update(
+                {
+                    "kind": request.form.get("kind") or "meal",
+                    "category": request.form.get("category", "").strip() or None,
+                    "cuisine": request.form.get("cuisine", "").strip() or None,
+                    # An unchecked checkbox sends nothing, so absence is false
+                    # rather than "leave it as it was".
+                    "favorite": request.form.get("favorite") == "on",
+                    "effort": int(effort) if effort else None,
+                    "serves": int(serves) if serves else None,
+                }
+            )
+            recipe_writer.update_recipe(
+                recipes_dir,
+                slug,
+                name=request.form.get("name", "").strip() or recipe.name,
+                frontmatter=frontmatter,
+                body=request.form.get("body", "").strip(),
+            )
+            app.recipes.reload()
+            return redirect(url_for("recipe_detail", slug=slug))
+
+        return render_template("recipe_edit.html", recipe=recipe, active="recipes")
+
     @app.route("/recipes/<slug>/ingredients", methods=["GET", "POST"])
     @login_required
     def recipe_ingredients(slug):

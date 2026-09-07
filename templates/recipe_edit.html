@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ recipe.name }} – Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="top-actions">
+      <h1 class="card__title">Edit {{ recipe.name }}</h1>
+      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
+    </div>
+    <hr class="card__rule">
+    <p class="card__meta">
+      Ingredients and steps are edited on their own screens and are left
+      untouched here.
+    </p>
+
+    <form method="post" action="{{ url_for('recipe_edit', slug=recipe.slug) }}">
+      <div class="form-row">
+        <div class="field">
+          <label for="name">Name</label>
+          <input id="name" type="text" name="name" value="{{ recipe.name }}" required>
+        </div>
+        <div class="field">
+          <label for="kind">Kind</label>
+          <select id="kind" name="kind">
+            {% for kind in ('meal', 'baked', 'sauce', 'side', 'breakfast') %}
+              <option value="{{ kind }}" {{ 'selected' if recipe.kind == kind else '' }}>{{ kind|titlecase }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="field">
+          <label for="category">Category</label>
+          <input id="category" type="text" name="category" value="{{ recipe.frontmatter.category or '' }}" placeholder="Mexican">
+        </div>
+        <div class="field">
+          <label for="cuisine">Cuisine</label>
+          <input id="cuisine" type="text" name="cuisine" value="{{ recipe.cuisine or '' }}">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="field">
+          <label for="serves">Serves</label>
+          <input id="serves" type="number" min="1" name="serves" value="{{ recipe.frontmatter.serves or '' }}">
+        </div>
+        <div class="field">
+          <label for="effort">Effort (1&ndash;5)</label>
+          <input id="effort" type="number" min="1" max="5" name="effort" value="{{ recipe.effort or '' }}">
+        </div>
+        <div class="field">
+          <label class="check" for="favorite">
+            <input id="favorite" type="checkbox" name="favorite" value="on" {{ 'checked' if recipe.is_favorite else '' }}>
+            Favorite
+          </label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="body">Notes</label>
+        <textarea id="body" name="body" rows="10">{{ recipe.body }}</textarea>
+        <span class="field__help">
+          Free text. Once the steps capture the method, the original prose is
+          often redundant — clearing this box entirely is fine, and the steps
+          are kept either way.
+        </span>
+      </div>
+
+      <button class="btn btn--primary" type="submit">Save</button>
+      <a class="btn btn--ghost" href="{{ url_for('recipe_detail', slug=recipe.slug) }}">Cancel</a>
+    </form>
+  </div>
+{% endblock %}

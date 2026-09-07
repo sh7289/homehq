@@ -62,6 +62,26 @@ def set_ingredients(recipes_dir, slug, ingredients):
     )
 
 
+def update_recipe(recipes_dir, slug, name, frontmatter, body):
+    """Rewrite a recipe's own fields, keeping its ingredients and steps.
+
+    The filename (and so the slug) never changes, even when the name does:
+    renaming the file would break every link to it for the sake of tidiness.
+    """
+    path = os.path.join(recipes_dir, f"{slug}.md")
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+
+    recipes = {r.slug: r for r in recipe_loader.load_recipes(recipes_dir)}
+    recipe = recipes.get(slug)
+    if recipe is None:
+        raise FileNotFoundError(path)
+
+    return _write(
+        path, name, frontmatter, recipe.ingredients, body, recipe.steps
+    )
+
+
 def set_steps(recipes_dir, slug, steps):
     """Replace one recipe's step graph in place, leaving all else untouched."""
     path = os.path.join(recipes_dir, f"{slug}.md")
