@@ -449,3 +449,66 @@ def test_favorites_only_toggle_is_offered_and_works(client, app):
     body = client.get("/recipes?favorites=on").data.decode()
     assert "Chicken Tinga Tacos" in body
     assert "Buttermilk Scones" not in body
+
+
+def test_paste_page_requires_login(client):
+    response = client.get("/recipes/paste")
+
+    assert response.status_code == 302
+    assert "/login" in response.headers["Location"]
+
+
+def test_pasting_a_recipe_prefills_the_new_recipe_form(client, app, monkeypatch):
+    import ai_extract
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_recipe",
+        lambda text, api_key=None: {
+            "name": "Chicken Piccata",
+            "kind": "meal",
+            "serves": 4,
+            "ingredients": [
+                {"name": "chicken breasts", "quantity": 2, "unit": "count",
+                 "fresh": True, "staple": False},
+                {"name": "capers", "quantity": 2, "unit": "tbsp",
+                 "fresh": False, "staple": False},
+            ],
+            "method": "Dredge, sear, deglaze.",
+        },
+    )
+    _login(client)
+
+    response = client.post("/recipes/paste", data={"text": "Chicken Piccata..."})
+
+    assert response.status_code == 200
+    body = response.data.decode()
+    assert "Chicken Piccata" in body
+    assert "chicken breasts | 2 | count | fresh" in body
+    assert "Dredge, sear, deglaze." in body
+    # Nothing is written until the human submits the prefilled form.
+    assert app.recipes.get("chicken-piccata") is None
+
+
+def test_pasting_nothing_asks_for_text(client, app):
+    _login(client)
+
+    response = client.post("/recipes/paste", data={"text": "   "})
+
+    assert response.status_code == 200
+    assert b"aste" in response.data
+
+
+def test_paste_reports_an_extraction_failure(client, app, monkeypatch):
+    import ai_extract
+
+    def boom(text, api_key=None):
+        raise ai_extract.ExtractionError("Model response was not valid JSON")
+
+    monkeypatch.setattr(ai_extract, "extract_recipe", boom)
+    _login(client)
+
+    response = client.post("/recipes/paste", data={"text": "some recipe"})
+
+    assert response.status_code == 200
+    assert b"not valid JSON" in response.data

@@ -12,6 +12,13 @@
       <p class="form-error">{{ error }}</p>
     {% endif %}
 
+    {% if from_paste %}
+      <p class="form-note">
+        Read from what you pasted — nothing is saved yet. Check the amounts and
+        the fresh/staple flags, then save.
+      </p>
+    {% endif %}
+
     <form method="post" action="{{ url_for('recipe_new') }}">
       <div class="form-row">
         <div class="field">

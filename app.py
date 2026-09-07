@@ -546,6 +546,67 @@ def create_app():
             active="recipes",
         )
 
+    @app.route("/recipes/paste", methods=["GET", "POST"])
+    @login_required
+    def recipe_paste():
+        """Paste a recipe from anywhere and get the new-recipe form prefilled.
+
+        Deliberately hands off to the existing form rather than writing a file:
+        the model will get some of it wrong, and correcting it before it is
+        saved is easier than correcting it afterwards.
+        """
+        if request.method != "POST":
+            return render_template("recipe_paste.html", error=None, text="", active="recipes")
+
+        text = request.form.get("text", "").strip()
+        if not text:
+            return render_template(
+                "recipe_paste.html",
+                error="Paste a recipe first.",
+                text="",
+                active="recipes",
+            )
+
+        try:
+            api_key = os.environ["HOMEHQ_ANTHROPIC_API_KEY"]
+        except KeyError:
+            return render_template(
+                "recipe_paste.html",
+                error="AI import isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY.",
+                text=text,
+                active="recipes",
+            )
+
+        try:
+            parsed = ai_extract.extract_recipe(text, api_key=api_key)
+        except ai_extract.ExtractionError as exc:
+            return render_template(
+                "recipe_paste.html", error=str(exc), text=text, active="recipes"
+            )
+
+        if not parsed["ingredients"]:
+            return render_template(
+                "recipe_paste.html",
+                error="That didn't look like a recipe -- no ingredients found in it.",
+                text=text,
+                active="recipes",
+            )
+
+        return render_template(
+            "recipe_form.html",
+            error=None,
+            form={
+                "name": parsed["name"],
+                "kind": parsed["kind"],
+                "serves": parsed["serves"] or "",
+                "ingredients": recipe_writer.ingredients_to_lines(parsed["ingredients"]),
+                "body": parsed["method"],
+            },
+            from_paste=True,
+            ingredient_help=_INGREDIENT_HELP,
+            active="recipes",
+        )
+
     @app.route("/recipes/new", methods=["GET", "POST"])
     @login_required
     def recipe_new():
@@ -795,6 +856,20 @@ def create_app():
             # Keep the user's words so they can retry without retyping.
             return render_template(
                 "capture.html", error=str(exc), text=text, active="capture"
+            )
+
+        if not rows:
+            # Capture only understands groceries. Pasting a recipe here would
+            # otherwise redirect to an empty review list and look like the app
+            # simply did nothing.
+            return render_template(
+                "capture.html",
+                error=(
+                    "Couldn't find any pantry or freezer items in that. If you "
+                    "were adding a recipe, paste it into Recipes instead."
+                ),
+                text=text,
+                active="capture",
             )
 
         for row in rows:

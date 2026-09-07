@@ -193,6 +193,41 @@ Notes from the cook:
 """
 
 
+_RECIPE_PROMPT = """Below is a recipe pasted from somewhere -- a website, a
+book, a message, or typed from memory. Pull it into structured form.
+
+Respond with ONLY a JSON object (no prose, no markdown fences):
+
+{{"kind": "recipe", "name": "Chicken Piccata", "recipe_kind": "meal",
+  "serves": 4,
+  "ingredients": [
+    {{"name": "chicken breasts", "quantity": 2, "unit": "count",
+     "fresh": true, "staple": false}}
+  ],
+  "method": "Dredge the chicken in flour and sear..."}}
+
+- "recipe_kind" is one of: meal, baked, sauce, side, breakfast.
+- "serves" is a number, or null if the text does not say.
+- Keep quantities as written. Unlike terse notes, a pasted recipe usually
+  states amounts -- record them. Use null only where the text gives none.
+- "fresh" is true for produce, dairy, fresh meat and fish, and fresh herbs.
+- "staple" is true for spices, dried herbs, oils, vinegars, flour and sugar.
+- An ingredient is not both fresh and staple.
+- Ingredient names go in lower case as you would write them on a shopping
+  list, except brand names and proper nouns.
+- Names carry no preparation or state: "capers", not "capers, drained";
+  "parsley", not "chopped parsley"; "chicken breasts", not "chicken breasts,
+  butterflied and pounded thin". Preparation belongs in the method, and a name
+  with it attached will not match anything in the pantry.
+- "method" is the cooking instructions as readable prose, with blank lines
+  between paragraphs. Keep the author's steps; do not invent or reorder them.
+- If the text is not a recipe at all, return an empty ingredients list.
+
+The pasted text:
+{text}
+"""
+
+
 class ExtractionError(Exception):
     pass
 
@@ -360,6 +395,54 @@ def parse_steps_response(response_text):
     if not isinstance(data, dict) or "items" not in data:
         raise ExtractionError("Response did not contain an 'items' list")
     return recipe_loader.normalize_steps(data.get("items"))
+
+
+_RECIPE_KINDS = ("meal", "baked", "sauce", "side", "breakfast")
+
+
+def parse_recipe_response(response_text):
+    """Parse a pasted-recipe reply into a dict ready to prefill the form."""
+    try:
+        data = json.loads(_strip_code_fence(response_text))
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ExtractionError(f"Model response was not valid JSON: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise ExtractionError("Response was not a recipe object")
+
+    ingredients = []
+    for raw in data.get("ingredients") or []:
+        try:
+            ingredients.append(recipe_loader.normalize_ingredient(raw))
+        except (ValueError, TypeError):
+            continue
+
+    kind = data.get("recipe_kind")
+    serves = data.get("serves")
+    return {
+        "name": (data.get("name") or "").strip(),
+        "kind": kind if kind in _RECIPE_KINDS else "meal",
+        "serves": serves if isinstance(serves, int) else None,
+        "ingredients": ingredients,
+        "method": (data.get("method") or "").strip(),
+    }
+
+
+def extract_recipe(text, api_key=None, model=None, client=None):
+    """Turn pasted recipe text into a structured recipe."""
+    client = _build_client(api_key, client)
+
+    message = client.messages.create(
+        model=model or DEFAULT_MODEL,
+        max_tokens=4096,
+        messages=[
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": _RECIPE_PROMPT.format(text=text)}],
+            }
+        ],
+    )
+    return parse_recipe_response(message.content[0].text)
 
 
 def extract_steps(name, ingredients, notes, api_key=None, model=None, client=None):

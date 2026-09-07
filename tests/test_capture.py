@@ -244,3 +244,18 @@ def test_capture_reports_extraction_failure(client, monkeypatch):
     assert response.status_code == 200
     assert b"not valid JSON" in response.data
     assert _staging_items() == []
+
+
+def test_capture_says_so_when_nothing_was_recognised(client, monkeypatch):
+    """Pasting a recipe into Capture returns no groceries. Redirecting to an
+    empty review list looks like the app did nothing at all."""
+    monkeypatch.setattr(ai_extract, "extract_from_text", lambda text, api_key=None: [])
+    _login(client)
+
+    response = client.post("/capture", data={"text": "Chicken Piccata, serves 4..."})
+
+    assert response.status_code == 200
+    body = response.data.decode().lower()
+    # Avoid the apostrophe: Jinja escapes it to &#39;.
+    assert "find any pantry or freezer items" in body
+    assert "recipe" in body, "should point at the right tool"

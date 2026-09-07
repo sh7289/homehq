@@ -30,7 +30,8 @@
     <ul class="rows">
       <li class="row">Say amounts if you know them — "two cans", "a bag". If you don't, leave it out and fill it in on the review screen.</li>
       <li class="row">Mention frozen things as frozen so they land in the freezer.</li>
-      <li class="row">Photographing a receipt? Use <a href="{{ url_for('import_upload') }}">Import</a> instead.</li>
+      <li class="row">Photographing a receipt or a shelf? Use <a href="{{ url_for('import_upload') }}">Import</a> instead.</li>
+      <li class="row">Adding a recipe? Paste it into <a href="{{ url_for('recipe_paste') }}">Recipes</a> — this box only understands groceries.</li>
     </ul>
   </div>
 {% endblock %}

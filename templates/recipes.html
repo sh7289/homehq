@@ -63,6 +63,7 @@
       </ul>
     {% endfor %}
 
-    <a class="btn btn--primary" href="{{ url_for('recipe_new') }}">Add a recipe</a>
+    <a class="btn btn--primary" href="{{ url_for('recipe_paste') }}">Paste a recipe</a>
+    <a class="btn" href="{{ url_for('recipe_new') }}">Add one by hand</a>
   </div>
 {% endblock %}

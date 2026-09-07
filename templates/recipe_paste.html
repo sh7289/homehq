@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Paste a recipe – Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="top-actions">
+      <h1 class="card__title">Paste a Recipe</h1>
+      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
+    </div>
+    <hr class="card__rule">
+    <p class="card__meta">
+      Paste a recipe from a website, a book, a message — anything. It comes
+      back as a filled-in form for you to check before it's saved.
+    </p>
+
+    {% if error %}
+      <p class="form-error">{{ error }}</p>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('recipe_paste') }}">
+      <div class="field">
+        <label for="text">Recipe text</label>
+        <textarea id="text" name="text" rows="14"
+                  placeholder="Chicken Piccata — serves 4&#10;&#10;2 chicken breasts, butterflied&#10;1/2 cup flour&#10;3 tbsp butter&#10;2 tbsp capers&#10;1 lemon&#10;&#10;Dredge the chicken in flour and sear 4 minutes a side...">{{ text }}</textarea>
+      </div>
+      <button class="btn btn--primary" type="submit">Read it</button>
+      <a class="btn btn--ghost" href="{{ url_for('recipe_new') }}">Type it out instead</a>
+    </form>
+
+    <span class="eyebrow">What it does and doesn't do</span>
+    <ul class="rows">
+      <li class="row">Keeps the amounts the recipe states, rather than guessing at them.</li>
+      <li class="row">Keeps the author's method as written — it won't reorder or invent steps.</li>
+      <li class="row">Nothing is saved until you review the form and submit it.</li>
+      <li class="row">Adding groceries to the pantry instead? Use <a href="{{ url_for('capture') }}">Capture</a>.</li>
+    </ul>
+  </div>
+{% endblock %}
