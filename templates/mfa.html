@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Verify it’s you – Home HQ{% endblock %}
+{% block fonts %}{% endblock %}
+{% block content %}
+<section class="card card--narrow">
+  <p class="eyebrow">Private finance</p>
+  <h1>Verify it’s you</h1>
+  <p>Use your authenticator to unlock financial balances for 15 minutes.</p>
+  {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+  {% if enrolled %}
+  <form method="post" action="{{ url_for('mfa') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ next_path }}">
+    <div class="field">
+      <label for="code">Authenticator code</label>
+      <input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" aria-describedby="code-help">
+      <p id="code-help">Enter the six-digit code from your authenticator app.</p>
+    </div>
+    <details><summary>Use a recovery code</summary>
+      <div class="field"><label for="recovery_code">Unused recovery code</label>
+      <input id="recovery_code" name="recovery_code" type="password" autocomplete="off" maxlength="256">
+      <p>Leave the authenticator field empty. Each recovery code works once.</p></div>
+    </details>
+    <button class="btn btn--primary" type="submit">Unlock finance</button>
+  </form>
+  {% endif %}
+  <p><a href="{{ url_for('home') }}">Return to Home</a></p>
+</section>
+{% endblock %}

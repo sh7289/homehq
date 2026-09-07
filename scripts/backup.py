@@ -15,9 +15,12 @@ manager. A backup you cannot decrypt after losing the box is not a backup.
 
 import argparse
 import os
+import re
 import sqlite3
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 from datetime import datetime, timezone
 
 GPG_BINARY = "gpg"
@@ -30,7 +33,7 @@ def _timestamp(now=None):
 
 def _snapshot(db_path, snapshot_path):
     """Copy a live SQLite database consistently, WAL contents included."""
-    source = sqlite3.connect(db_path)
+    source = sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True)
     try:
         target = sqlite3.connect(snapshot_path)
         try:
@@ -58,23 +61,30 @@ def create_backup(
             "A backup passphrase is required (set HOMEHQ_BACKUP_PASSPHRASE)."
         )
 
+    if not os.path.isfile(db_path) or os.path.islink(db_path):
+        raise ValueError("Backup source must be an existing regular database file.")
+
     dest = os.path.realpath(dest_dir)
     if repo_dir:
         repo = os.path.realpath(repo_dir)
         if dest == repo or dest.startswith(repo + os.sep):
             raise ValueError(
-                f"Refusing to write backups into the git repo dir ({repo}): approved "
-                "catalog imports stage that directory and would push the backup to "
-                "GitHub. Pick a destination outside the repo."
+                "Refusing to write backups into the git repo directory. "
+                "Pick a destination outside the repo."
             )
 
-    os.makedirs(dest, exist_ok=True)
+    os.makedirs(dest, mode=0o700, exist_ok=True)
     stem = os.path.splitext(os.path.basename(db_path))[0]
-    snapshot_path = os.path.join(dest, f"{stem}-{_timestamp(now)}.db")
-    encrypted_path = snapshot_path + ".gpg"
+    encrypted_path = os.path.join(dest, f"{stem}-{_timestamp(now)}.db.gpg")
 
-    _snapshot(db_path, snapshot_path)
-    try:
+    # Private workspace covers partial SQLite snapshots and gpg failures too.
+    # Ciphertext is published atomically only once encryption succeeds.
+    with tempfile.TemporaryDirectory(prefix=".snapshot-", dir=dest) as temporary:
+        snapshot_path = os.path.join(temporary, "snapshot.db")
+        staged_ciphertext = os.path.join(temporary, "encrypted.gpg")
+        fd = os.open(snapshot_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
+        _snapshot(db_path, snapshot_path)
         runner(
             [
                 GPG_BINARY,
@@ -86,7 +96,7 @@ def create_backup(
                 "--passphrase-fd",
                 "0",
                 "--output",
-                encrypted_path,
+                staged_ciphertext,
                 snapshot_path,
             ],
             # Passphrase goes over stdin, never argv -- argv is world-readable
@@ -94,25 +104,31 @@ def create_backup(
             input=passphrase.encode("utf-8"),
             check=True,
         )
-    finally:
-        if os.path.exists(snapshot_path):
-            os.remove(snapshot_path)
+        os.chmod(staged_ciphertext, 0o600)
+        os.replace(staged_ciphertext, encrypted_path)
 
     return encrypted_path
 
 
 def prune_backups(dest_dir, keep=14):
-    """Delete all but the `keep` newest encrypted backups."""
+    """Retain `keep` timestamped backups per database; ignore other files."""
     if keep < 1:
         raise ValueError("keep must be at least 1")
-    names = sorted(n for n in os.listdir(dest_dir) if n.endswith(".gpg"))
-    for name in names[:-keep]:
-        os.remove(os.path.join(dest_dir, name))
+    groups = {}
+    for name in os.listdir(dest_dir):
+        match = re.fullmatch(r"(.+)-\d{4}-\d{2}-\d{2}T\d{6}Z\.db\.gpg", name)
+        path = os.path.join(dest_dir, name)
+        if match and os.path.isfile(path) and not os.path.islink(path):
+            groups.setdefault(match[1], []).append(name)
+    for names in groups.values():
+        for name in sorted(names)[:-keep]:
+            os.remove(os.path.join(dest_dir, name))
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Back up the Home HQ database.")
     parser.add_argument("--db", default=os.environ.get("HOMEHQ_DB_PATH"))
+    parser.add_argument("--finance-db", default=os.environ.get("HOMEHQ_FINANCE_DB_PATH"))
     parser.add_argument("--dest", default=os.environ.get("HOMEHQ_BACKUP_DIR"))
     parser.add_argument("--keep", type=int, default=int(os.environ.get("HOMEHQ_BACKUP_KEEP", "14")))
     args = parser.parse_args(argv)
@@ -123,14 +139,18 @@ def main(argv=None):
     content_dir = os.environ.get("HOMEHQ_CONTENT_DIR")
     repo_dir = os.path.dirname(os.path.normpath(content_dir)) if content_dir else None
 
-    path = create_backup(
-        args.db,
-        args.dest,
-        passphrase=os.environ.get("HOMEHQ_BACKUP_PASSPHRASE", ""),
-        repo_dir=repo_dir,
-    )
+    sources = [args.db] + ([args.finance_db] if args.finance_db else [])
+    stems = [Path(source).stem for source in sources]
+    if len(stems) != len(set(stems)):
+        parser.error("Database filenames must have distinct stems for backup retention.")
+    for source in sources:
+        create_backup(
+            source, args.dest,
+            passphrase=os.environ.get("HOMEHQ_BACKUP_PASSPHRASE", ""),
+            repo_dir=repo_dir,
+        )
     prune_backups(args.dest, keep=args.keep)
-    print(f"✅ Backup written: {path}")
+    print(f"Encrypted backups written: {len(sources)} database(s).")
     return 0
 
 
