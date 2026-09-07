@@ -132,7 +132,16 @@ Respond with ONLY a JSON object (no prose, no markdown fences):
   jarred, dried, frozen goods), set both false.
 - Name the ingredient as you would write it on a shopping list: "ground beef",
   not "lean ground beef 90/10 preferred". Put nothing else in the name.
-- Include ingredients mentioned in serving suggestions.
+- Write names in lower case, except brand names and proper nouns
+  ("parmesan", but "Fritos").
+- Stock, bouillon and stock paste are staples.
+- Serving suggestions need judgement. Include an accompaniment only if it is
+  one thing you would buy: sour cream, cheddar, avocado, tortillas. EXCLUDE
+  accompaniments that are separate dishes needing their own cooking: mashed
+  potatoes, salad, garlic bread, rice pilaf.
+- When the notes offer alternatives -- "serve with pasta, mashed potatoes,
+  rice, or bread" -- that is a choice made at dinnertime, not a shopping list.
+  Include none of them.
 - Do not invent ingredients that the notes do not mention, even if the dish
   would normally use them.
 

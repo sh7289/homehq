@@ -172,3 +172,45 @@ def test_a_straight_chain_also_fills_every_column():
             for offset in range(1, cell["rowspan"]):
                 occupied[index + offset] += 1
         assert emitted + occupied[index] == columns
+
+
+# Shape taken from the real Chicken Tacos extraction: salt is consumed by two
+# different steps, so the graph is a DAG rather than a tree.
+SHARED_INGREDIENT_STEPS = [
+    {"id": "s1", "action": "season and sear chicken", "inputs": ["chicken", "salt"]},
+    {"id": "s2", "action": "dice tomatoes", "inputs": ["tomatoes", "lime", "salt"]},
+    {"id": "s3", "action": "warm tortillas", "inputs": ["tortillas"]},
+    {"id": "s4", "action": "assemble", "inputs": ["s1", "s2", "s3"]},
+]
+SHARED_INGREDIENTS = [
+    {"name": "chicken"},
+    {"name": "salt"},
+    {"name": "tomatoes"},
+    {"name": "lime"},
+    {"name": "tortillas"},
+]
+
+
+def test_no_step_is_dropped_when_an_ingredient_is_shared():
+    """Two steps consuming the same ingredient collide in one column; the
+    later one must move right, not vanish from the table."""
+    table = recipe_steps.build_table(SHARED_INGREDIENTS, SHARED_INGREDIENT_STEPS)
+
+    rendered = {
+        c["action"] for row in table["rows"] for c in row["cells"] if not c.get("spacer")
+    }
+    for step in SHARED_INGREDIENT_STEPS:
+        assert step["action"] in rendered, f"{step['action']} is missing from the table"
+
+
+def test_shared_ingredient_layout_still_fills_every_column():
+    table = recipe_steps.build_table(SHARED_INGREDIENTS, SHARED_INGREDIENT_STEPS)
+
+    columns = table["columns"]
+    occupied = [0] * len(table["rows"])
+    for index, row in enumerate(table["rows"]):
+        emitted = len(row["cells"])
+        for cell in row["cells"]:
+            for offset in range(1, cell["rowspan"]):
+                occupied[index + offset] += 1
+        assert emitted + occupied[index] == columns, f"row {index} does not fill the table"

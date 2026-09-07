@@ -79,16 +79,30 @@ def build_table(ingredients, steps):
     order = _ordered_names(steps, by_id, list(by_name))
     row_of = {name: index for index, name in enumerate(order)}
 
+    row_count = len(order)
     starts = {}
+    taken = set()  # (row, column) claimed by a placed step
     max_column = -1
-    for step in steps:
+
+    # Shallowest first, so an operation never lands left of one it feeds.
+    for step in sorted(steps, key=lambda s: _depth(s.get("id", ""), by_id)
+                       if s.get("id") in by_id else 0):
         if step.get("id") not in by_id:
             continue
         rows = [row_of[name] for name in _leaves(step["id"], by_id) if name in row_of]
         if not rows:
             continue
         start, end = min(rows), max(rows)
+
+        # An ingredient used by two steps makes the graph a DAG, and their
+        # row ranges overlap. Shift right until the whole span is free rather
+        # than dropping the later step, which would silently lose it.
         column = _depth(step["id"], by_id)
+        while any((row, column) in taken for row in range(start, end + 1)):
+            column += 1
+
+        for row in range(start, end + 1):
+            taken.add((row, column))
         max_column = max(max_column, column)
         starts[(start, column)] = {
             "action": step.get("action") or "",
@@ -97,7 +111,6 @@ def build_table(ingredients, steps):
         }
 
     columns = max_column + 1
-    row_count = len(order)
 
     # HTML lays cells out left-to-right and ignores our column numbers: a
     # <td> simply takes the next free slot. So every gap has to be filled
