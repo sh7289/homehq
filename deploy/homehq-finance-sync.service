@@ -1,0 +1,19 @@
+[Unit]
+Description=Home HQ daily read-only balance sync
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=homehq
+Group=homehq
+WorkingDirectory=/home/homehq/homehq
+EnvironmentFile=/home/homehq/.homehq.env
+# Only this process receives the provider credential, never the web service.
+EnvironmentFile=/home/homehq/data/.homehq-finance.env
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+TimeoutStartSec=120
+ExecStart=/home/homehq/homehq/.venv/bin/python scripts/sync_finance.py

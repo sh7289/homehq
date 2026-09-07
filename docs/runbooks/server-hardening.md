@@ -23,14 +23,19 @@ also a backup-plan item).
 
 ---
 
-## 2. Confirm you can get back in without SSH
+## 2. Confirm a second SSH access path and snapshot recovery
 
 Lightsail console → Instance → **Connect using SSH** (the browser terminal).
-It connects through AWS rather than your own key, so it still works if you
-break `sshd_config` or lock your IP out.
+It uses AWS-managed keys, but still needs a working SSH daemon and port-22
+access. It does not bypass broken `sshd_config` or an OS firewall blocking SSH.
+When restricting the Lightsail SSH firewall rule, retain **Allow Lightsail
+browser SSH**. Test browser SSH before and after each firewall change.
 
 Confirm it opens and you can `sudo -n true`. If the browser console does not
-work, **stop here** — everything below assumes it as the escape hatch.
+work, **stop here**. The snapshot from step 1 is the recovery path if both SSH
+methods fail; the browser terminal is not an out-of-band console.
+
+[AWS: Lightsail firewall and browser SSH](https://aws.amazon.com/blogs/compute/enhancing-site-security-with-new-lightsail-firewall-features/).
 
 ---
 
@@ -97,19 +102,21 @@ grep -c . ~/.ssh/authorized_keys       # expect at least 1
 Then:
 
 ```bash
-sudo tee /etc/ssh/sshd_config.d/99-hardening.conf >/dev/null <<'EOF'
+sudo tee /etc/ssh/sshd_config.d/00-homehq-hardening.conf >/dev/null <<'EOF'
 PasswordAuthentication no
 PermitRootLogin no
 PubkeyAuthentication yes
 KbdInteractiveAuthentication no
 EOF
-sudo sshd -t && echo "config OK"
-sudo systemctl reload ssh
+sudo sshd -t
+sudo sshd -T | grep -E '^(passwordauthentication|permitrootlogin|kbdinteractiveauthentication|pubkeyauthentication)'
 ```
 
-**`sshd -t` must print "config OK" before you reload.** If it reports an
-error, fix it before going further — reloading a broken config is how you
-lose access.
+**Both syntax and effective settings must pass before reloading.** Expect
+passwordauthentication, permitrootlogin, and kbdinteractiveauthentication to
+be `no`, pubkeyauthentication `yes`. OpenSSH uses the first value encountered
+for many settings, so a late `99-` file may not override earlier cloud config.
+Check any `Match` blocks too. Then run `sudo systemctl reload ssh`.
 
 Now, from a **new terminal**, open a fresh SSH session and confirm it works.
 Only once that succeeds should you close the original.
@@ -131,11 +138,13 @@ Set the SSH rule's source to that address. **If your home IP is dynamic**
 survivable because of the browser console from step 2, but annoying. Two
 sane options:
 
-- Restrict to your ISP's rough range rather than a single address, or
-- Close port 22 entirely and use the Lightsail browser console for all admin.
+- Update the allowlisted address in the AWS console when your home IP changes, or
+- Remove public/home-IP SSH access while retaining the Lightsail browser-SSH
+  allowance on the SSH rule, then verify a new browser connection.
 
-The second is the stronger position and costs you `scp`. Your call; either is
-a large improvement on open-to-the-world.
+Do not remove every port-22 allowance and assume browser SSH still works.
+For scheduled backup pulls from a home computer, retain that computer's current
+public IP allowance. Account for IPv6 rules as well as IPv4.
 
 Do **not** touch the 80 and 443 rules — the site needs them.
 
@@ -181,7 +190,7 @@ Only then close the original session.
 
 ## If you lock yourself out
 
-1. Lightsail browser console (step 2) — works even with port 22 closed.
+1. Lightsail browser SSH (step 2), if its firewall allowance and sshd still work.
 2. If that fails too: Lightsail console → Snapshots → create a new instance
    from the snapshot taken in step 1, then re-attach the static IP.
 

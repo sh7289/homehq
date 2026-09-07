@@ -34,6 +34,8 @@ import db
 import export_csv
 import expiry
 import matching
+import mfa_security
+import finance_routes
 import recipe_loader
 import recipe_scale
 import recipe_steps
@@ -135,6 +137,9 @@ def create_app():
             return User(username)
         return None
 
+    mfa_security.init_app(app, get_db, users)
+    finance_routes.init_app(app)
+
     @app.template_filter("titlecase")
     def titlecase_filter(value):
         return value.replace("_", " ").replace("-", " ").title()
@@ -212,6 +217,7 @@ def create_app():
                 db.clear_login_failures(conn, identifier)
                 # Opt into PERMANENT_SESSION_LIFETIME; without this the cookie
                 # is a session cookie with no server-side expiry at all.
+                session.clear()
                 session.permanent = True
                 login_user(User(username))
                 return redirect(url_for("home"))
@@ -228,6 +234,7 @@ def create_app():
     @login_required
     def logout():
         logout_user()
+        session.clear()
         return redirect(url_for("login"))
 
     @app.route("/")
