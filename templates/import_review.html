@@ -24,13 +24,14 @@
               <span class="row__name">{{ item.name }}</span>
               <span class="row__meta">{{ item.error or "Could not be read." }}</span>
               <span class="row__actions">
-                <form class="inline-form" method="post" action="{{ url_for('import_retry', item_id=item.id) }}" data-pending-message="Retrying&hellip;">
+                <form class="inline-form" method="post" action="{{ url_for('import_retry', item_id=item.id) }}" data-pending-message="Retrying&hellip;" data-pending-status="retry-status-{{ item.id }}">
                   <button class="btn btn--sm" type="submit">Retry</button>
                 </form>
                 <form class="inline-form" method="post" action="{{ url_for('import_reject', item_id=item.id) }}">
                   <button class="btn btn--sm btn--ghost" type="submit">Discard</button>
                 </form>
               </span>
+              <span id="retry-status-{{ item.id }}" class="status-live status-live--inline" aria-live="polite" role="status"></span>
             </li>
           {% endfor %}
         </ul>

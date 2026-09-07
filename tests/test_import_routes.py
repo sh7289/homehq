@@ -774,6 +774,59 @@ def test_import_upload_form_disables_submit_while_pending():
     assert 'role="alert"' not in html
 
 
+def test_retry_form_has_a_live_status_region_that_actually_resolves(client, monkeypatch):
+    """The Retry form sits inside a list row alongside a Discard form, so its
+    next DOM sibling is NOT a status-live element -- unlike the standalone
+    upload/capture/paste forms. It must instead point at its own live region
+    via data-pending-status, and that id must resolve to a real
+    aria-live="polite" element actually present in the rendered page (not
+    just asserted to exist somewhere in the template source)."""
+    import re
+
+    import ai_extract
+    import db
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: (_ for _ in ()).throw(
+            ai_extract.ExtractionError("could not read that one")
+        ),
+    )
+    _login(client)
+    client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"blurry"), "shelf-a.jpg")},
+        content_type="multipart/form-data",
+    )
+    failed_id = _staging_items(status="failed")[0]["id"]
+
+    response = client.get("/import")
+    body = response.data.decode()
+
+    retry_form_match = re.search(
+        r'<form[^>]*action="/import/%d/retry"[^>]*>' % failed_id, body
+    )
+    assert retry_form_match, "expected a retry form for the failed item"
+    retry_form_html = retry_form_match.group(0)
+
+    status_id_match = re.search(r'data-pending-status="([^"]+)"', retry_form_html)
+    assert status_id_match, "retry form must name its own status region"
+    status_id = status_id_match.group(1)
+
+    # That id must resolve to a real element in the page -- not merely be a
+    # string present somewhere -- and that element must be a polite live
+    # region, not role="alert".
+    status_el_match = re.search(
+        r'<span id="%s"([^>]*)></span>' % re.escape(status_id), body
+    )
+    assert status_el_match, f"no element with id={status_id!r} found in the rendered page"
+    status_el_attrs = status_el_match.group(1)
+    assert 'aria-live="polite"' in status_el_attrs
+    assert 'role="status"' in status_el_attrs
+    assert "alert" not in status_el_attrs
+
+
 def test_upload_page_error_render_has_no_batch_or_failed_rows(client, monkeypatch):
     """The existing all-failed inline-error path is unchanged: it renders on
     the upload page itself (no redirect), and the pending 'failed' rows it

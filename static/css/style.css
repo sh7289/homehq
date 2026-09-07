@@ -713,6 +713,17 @@ summary:focus-visible {
   min-height: 1.2em;
 }
 
+/* Same live region, sized for a status-live sitting inside a flex .row
+   (e.g. the Retry status in import_review.html's "Needs attention" list)
+   rather than under a standalone form: forced onto its own line via
+   flex-basis, and with no reserved height, so an empty one adds nothing to
+   a list of several rows -- it only takes space while a message is set. */
+.status-live--inline {
+  flex-basis: 100%;
+  min-height: 0;
+  margin: 0.3rem 0 0;
+}
+
 /* Same shape as .form-error, using the success/warning status tokens --
    for outcomes that aren't failures (or aren't only failures). */
 .notice {
