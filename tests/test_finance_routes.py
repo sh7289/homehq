@@ -150,3 +150,18 @@ def test_three_decimal_currency_is_never_rounded_to_cents(finance_app):
     conn.close()
     response = app.test_client().get('/finance')
     assert response.data.count(b'0.001') == 3  # total, account, daily table
+
+
+@pytest.mark.parametrize('table', ['finance_accounts', 'finance_snapshot_totals'])
+@pytest.mark.parametrize('invalid', ['broken', 'NaN', 'Infinity', 'sNaN'])
+def test_corrupted_balance_returns_safe_unavailable(finance_app, table, invalid):
+    app, path = finance_app
+    conn = finance_store.connect(str(path))
+    finance_store.record_sync(conn, {'accounts':[{'id':'a'*64, 'label':'Savings', 'currency':'USD',
+        'balance':Decimal('1.00'), 'balance_at':'2026-09-07T12:00:00Z'}], 'warnings':[], 'complete':True})
+    conn.execute('UPDATE ' + table + ' SET balance=?', (invalid,))
+    conn.commit()
+    conn.close()
+    response = app.test_client().get('/finance')
+    assert response.status_code == 200
+    assert b'Balances temporarily unavailable' in response.data

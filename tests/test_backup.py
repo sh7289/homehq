@@ -210,3 +210,25 @@ def test_cli_backs_up_both_configured_databases(tmp_path, monkeypatch):
     assert sorted(p.name for p in dest.iterdir()) == [
         "finance-2026-09-07T000000Z.db.gpg", "pantry-2026-09-07T000000Z.db.gpg",
     ]
+
+
+@pytest.mark.parametrize('kind', ['public', 'symlink', 'file'])
+def test_backup_rejects_unsafe_existing_destination(tmp_path, kind):
+    source = tmp_path / 'source.db'
+    conn = _make_db(str(source))
+    conn.close()
+    dest = tmp_path / 'backups'
+    if kind == 'file':
+        dest.write_text('keep')
+    elif kind == 'symlink':
+        target = tmp_path / 'target'
+        target.mkdir(mode=0o700)
+        dest.symlink_to(target, target_is_directory=True)
+    else:
+        dest.mkdir(mode=0o755)
+        dest.chmod(0o755)
+    runner = _FakeGPG()
+    with pytest.raises(ValueError, match='destination'):
+        backup.create_backup(str(source), str(dest), 'secret', runner=runner)
+    assert runner.calls == []
+    assert not list(tmp_path.rglob('*.gpg'))

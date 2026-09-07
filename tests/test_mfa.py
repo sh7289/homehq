@@ -169,3 +169,29 @@ def test_throttle_expires(enrolled, monkeypatch):
         verify(client,'000000')
     monkeypatch.setattr(mfa.time,'time',lambda:1800000301)
     assert verify(client,pyotp.TOTP(SECRET).at(1800000301)).status_code == 302
+
+
+def test_schema_setup_does_not_commit_callers_transaction(app, tmp_path):
+    import mfa_security as mfa
+    conn = sqlite3.connect(tmp_path / 'transaction.db')
+    conn.execute('CREATE TABLE example(value TEXT)')
+    conn.commit()
+    conn.execute("INSERT INTO example VALUES ('uncommitted')")
+    app.extensions['homehq_mfa']['get_db'] = lambda: conn
+    with app.app_context():
+        mfa._connection()
+    assert conn.in_transaction
+    conn.rollback()
+    assert conn.execute('SELECT count(*) FROM example').fetchone()[0] == 0
+    conn.close()
+
+
+@pytest.mark.parametrize('value', [None, 123, [], 'é', 'wrong'])
+def test_invalid_grant_fingerprint_fails_closed(enrolled, value):
+    client = enrolled.test_client()
+    login(client)
+    assert verify(client, pyotp.TOTP(SECRET).at(1800000000)).status_code == 302
+    with client.session_transaction() as state:
+        state['mfa_grant']['fingerprint'] = value
+        state.modified = True
+    assert '/mfa' in client.get('/private-test').location

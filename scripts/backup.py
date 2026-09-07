@@ -17,6 +17,7 @@ import argparse
 import os
 import re
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -64,7 +65,13 @@ def create_backup(
     if not os.path.isfile(db_path) or os.path.islink(db_path):
         raise ValueError("Backup source must be an existing regular database file.")
 
-    dest = os.path.realpath(dest_dir)
+    dest = os.path.abspath(dest_dir)
+    if os.path.realpath(dest) != dest:
+        raise ValueError("Backup destination must not use symbolic links.")
+    if os.path.lexists(dest):
+        info = os.lstat(dest)
+        if not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o077:
+            raise ValueError("Backup destination must be a private directory (0700).")
     if repo_dir:
         repo = os.path.realpath(repo_dir)
         if dest == repo or dest.startswith(repo + os.sep):

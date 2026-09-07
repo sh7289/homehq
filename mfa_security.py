@@ -80,8 +80,10 @@ def _secret(username):
 
 def _connection():
     conn = current_app.extensions['homehq_mfa']['get_db']()
-    # DDL is idempotent and does not touch ordinary pantry data.
-    conn.executescript(SCHEMA)
+    # execute() preserves the caller's transaction; executescript() commits it.
+    for statement in SCHEMA.split(';'):
+        if statement.strip():
+            conn.execute(statement)
     return conn
 
 
@@ -97,9 +99,12 @@ def has_recent_mfa():
     secret = _secret(current_user.id)
     if not isinstance(grant, dict) or not secret:
         return False
+    stored_fingerprint = grant.get('fingerprint')
+    if not isinstance(stored_fingerprint, str) or not stored_fingerprint.isascii():
+        return False
     stamp = grant.get('at')
     return (grant.get('username') == current_user.id
-            and grant.get('fingerprint') == fingerprint(secret)
+            and hmac.compare_digest(stored_fingerprint, fingerprint(secret))
             and isinstance(stamp, (int, float)) and 0 <= time.time() - stamp <= 900
             and bool(_enrolled(_connection(), current_user.id, secret)))
 

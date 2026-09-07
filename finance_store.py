@@ -212,6 +212,17 @@ def _validate_payload(payload):
     return accounts
 
 
+def _stored_balance(value):
+    """Reject malformed/nonfinite persisted balances without leaking their text."""
+    try:
+        number = Decimal(value)
+    except (InvalidOperation, TypeError, ValueError):
+        raise FinanceStoreError("Finance database contains invalid balance data.") from None
+    if not number.is_finite():
+        raise FinanceStoreError("Finance database contains invalid balance data.")
+    return number
+
+
 def _current_totals(conn):
     totals = {}
     rows = conn.execute(
@@ -219,10 +230,7 @@ def _current_totals(conn):
         "WHERE missing = 0 AND currency != 'NONFINANCIAL' ORDER BY currency"
     )
     for row in rows:
-        try:
-            value = Decimal(row["balance"])
-        except InvalidOperation:
-            raise FinanceStoreError("Finance database contains invalid balance data.")
+        value = _stored_balance(row["balance"])
         with localcontext() as context:
             # The provider admits up to 40 significant digits and 18 decimals.
             # 64 digits also covers aggregate growth within the bounded payload.
@@ -371,7 +379,7 @@ def dashboard(conn, now=None):
                 "id": row["id"],
                 "label": row["label"],
                 "currency": row["currency"],
-                "balance": Decimal(row["balance"]),
+                "balance": _stored_balance(row["balance"]),
                 "balance_at": row["balance_at"],
                 "observed_at": row["observed_at"],
                 "missing": bool(row["missing"]),
@@ -385,7 +393,7 @@ def dashboard(conn, now=None):
         "SELECT day, complete FROM finance_snapshot_days ORDER BY day"
     ):
         values = {
-            row["currency"]: Decimal(row["balance"])
+            row["currency"]: _stored_balance(row["balance"])
             for row in conn.execute(
                 "SELECT currency, balance FROM finance_snapshot_totals "
                 "WHERE day = ? ORDER BY currency",
