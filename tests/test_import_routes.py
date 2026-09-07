@@ -827,6 +827,192 @@ def test_retry_form_has_a_live_status_region_that_actually_resolves(client, monk
     assert "alert" not in status_el_attrs
 
 
+def test_import_photo_route_requires_login(client):
+    import db
+
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    upload_path = os.path.join(os.environ["HOMEHQ_UPLOADS_DIR"], "shelf.jpg")
+    with open(upload_path, "wb") as f:
+        f.write(b"fake-jpeg-bytes")
+    item_id = db.add_staging_item(
+        conn, target_type="inventory", name="Rice", source_image_path=upload_path
+    )
+    conn.close()
+
+    response = client.get(f"/import/{item_id}/photo")
+
+    assert response.status_code == 302
+    assert "/login" in response.headers["Location"]
+
+
+def test_import_photo_route_serves_the_staging_items_photo(client):
+    import db
+
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    upload_path = os.path.join(os.environ["HOMEHQ_UPLOADS_DIR"], "shelf.jpg")
+    with open(upload_path, "wb") as f:
+        f.write(b"fake-jpeg-bytes")
+    item_id = db.add_staging_item(
+        conn, target_type="inventory", name="Rice", source_image_path=upload_path
+    )
+    conn.close()
+
+    response = client.get(f"/import/{item_id}/photo")
+
+    assert response.status_code == 200
+    assert response.data == b"fake-jpeg-bytes"
+
+
+def test_import_photo_route_404s_for_nonexistent_item(client):
+    _login(client)
+
+    response = client.get("/import/999999/photo")
+
+    assert response.status_code == 404
+
+
+def test_import_photo_route_404s_for_a_text_capture_with_no_photo(client):
+    import db
+
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    item_id = db.add_staging_item(conn, target_type="inventory", name="Onions")
+    conn.close()
+
+    response = client.get(f"/import/{item_id}/photo")
+
+    assert response.status_code == 404
+
+
+def test_import_photo_route_cannot_be_used_to_serve_an_arbitrary_path(client, tmp_path):
+    """The route is keyed on the staging item's own id -- there is no
+    filename/path parameter for a client to supply or manipulate. This test
+    exercises the defensive commonpath backstop directly: even if
+    source_image_path in the database somehow pointed outside uploads_dir
+    (corruption, a bug elsewhere), the route must still refuse to serve it
+    rather than trusting the stored path blindly."""
+    import db
+
+    _login(client)
+    outside_secret = tmp_path / "secret.txt"
+    outside_secret.write_text("top secret")
+
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    item_id = db.add_staging_item(
+        conn, target_type="inventory", name="Rice", source_image_path=str(outside_secret)
+    )
+    conn.close()
+
+    response = client.get(f"/import/{item_id}/photo")
+
+    assert response.status_code == 404
+
+
+def test_import_photo_route_has_no_client_supplied_path_parameter(client):
+    """Sanity check on the URL shape itself: unlike /photos/<path:filename>,
+    this route must not accept a filename/path segment at all -- only the
+    item's own integer id."""
+    import db
+
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    upload_path = os.path.join(os.environ["HOMEHQ_UPLOADS_DIR"], "shelf.jpg")
+    with open(upload_path, "wb") as f:
+        f.write(b"fake")
+    item_id = db.add_staging_item(
+        conn, target_type="inventory", name="Rice", source_image_path=upload_path
+    )
+    conn.close()
+
+    # Appending an arbitrary path segment after the id must not resolve --
+    # the route is /import/<int:item_id>/photo, nothing more.
+    response = client.get(f"/import/{item_id}/photo/../../etc/passwd")
+
+    assert response.status_code == 404
+
+
+def test_review_page_groups_rows_by_source_photo(client):
+    import db
+
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    for name, path in (
+        ("Rice", "/uploads/photo-a.jpg"),
+        ("Beans", "/uploads/photo-a.jpg"),
+        ("Milk", "/uploads/photo-b.jpg"),
+    ):
+        db.add_staging_item(conn, target_type="inventory", name=name, source_image_path=path)
+    conn.close()
+
+    response = client.get("/import")
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    # Two distinct photo previews, one per source image.
+    assert body.count('alt="Photo for Rice"') == 1
+    assert body.count('alt="Photo for Milk"') == 1
+    # Rice and Beans (same photo) appear inside one group; find the group
+    # boundary via the two enlarge links and check both names fall inside
+    # the first one, not split across groups.
+    first_group_end = body.index('alt="Photo for Milk"')
+    assert "Rice" in body[:first_group_end]
+    assert "Beans" in body[:first_group_end]
+
+
+def test_review_page_gives_text_captures_a_no_photo_presentation(client):
+    """A text-capture staging row (no source_image_path) must not render a
+    broken <img> or an empty photo slot."""
+    import db
+
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    db.add_staging_item(conn, target_type="inventory", name="Garlic")
+    conn.close()
+
+    response = client.get("/import")
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert "Garlic" in body
+    assert "<img" not in body or "Photo for Garlic" not in body
+    assert "import-group--nophoto" in body
+
+
+def test_review_page_match_panel_shows_unit_and_storage(client):
+    import db
+
+    _login(client)
+    client.post(
+        "/pantry/add",
+        data={"name": "Rice", "quantity": "3", "unit": "bags", "location": ""},
+    )
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    db.add_staging_item(
+        conn, target_type="inventory", name="Rice", quantity=1, storage="pantry"
+    )
+    conn.close()
+
+    response = client.get("/import")
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert "Looks like a match" in body
+    # Matched item's own quantity, unit, and storage are shown, not just its
+    # name and a quantity input for the new value.
+    assert "3" in body
+    assert "bags" in body
+    assert "Pantry" in body
+
+
 def test_upload_page_error_render_has_no_batch_or_failed_rows(client, monkeypatch):
     """The existing all-failed inline-error path is unchanged: it renders on
     the upload page itself (no redirect), and the pending 'failed' rows it

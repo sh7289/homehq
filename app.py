@@ -627,6 +627,7 @@ def create_app():
         return render_template(
             "import_review.html",
             items=pending,
+            groups=db.group_staging_items_by_photo(pending),
             failed_items=failed,
             suggestions=suggestions,
             categories=app.catalog.categories(),
@@ -1572,6 +1573,34 @@ def create_app():
         if os.path.commonpath([photos_root, requested]) != photos_root:
             abort(404)
         return send_from_directory(photos_root, filename)
+
+    @app.route("/import/<int:item_id>/photo")
+    @login_required
+    def import_staging_photo(item_id):
+        """Serve the source photo for one staged import row.
+
+        Unlike /photos/<path:filename> above, the client never supplies (or
+        sees) a filesystem path here -- only the staging item's own id, which
+        it already has from the review page. The path is looked up
+        server-side from the database, so there is nothing for a client to
+        traverse with. The commonpath check below is a defense-in-depth
+        backstop (matching the posture of the /photos route) in case
+        source_image_path was ever corrupted or pointed outside
+        uploads_dir -- not something a client can influence directly.
+        """
+        staging_item = db.get_staging_item(get_db(), item_id)
+        if staging_item is None or not staging_item.get("source_image_path"):
+            abort(404)
+
+        uploads_root = os.path.realpath(uploads_dir)
+        requested = os.path.realpath(staging_item["source_image_path"])
+        if os.path.commonpath([uploads_root, requested]) != uploads_root:
+            abort(404)
+        if not os.path.isfile(requested):
+            abort(404)
+
+        directory, filename = os.path.split(requested)
+        return send_from_directory(directory, filename)
 
     @app.route("/export/pantry.csv")
     @login_required

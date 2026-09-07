@@ -1450,6 +1450,57 @@ details[open] > .disclosure__summary::after {
   margin-top: 0.3rem;
 }
 
+/* ---------- import review: group rows by source photo ----------
+   Mobile-first: the photo (or the no-photo label) sits above its group's
+   rows, matching the plan's "mobile: source preview above that image's
+   rows" requirement. At the desktop breakpoint used elsewhere on this page
+   (860px, see .row/.section-group above) the photo moves beside the rows
+   instead, so correcting an amount never requires scrolling away from the
+   image it was read from. */
+.import-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+
+.import-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.import-group__photo {
+  align-self: flex-start;
+}
+
+.import-group__photo .photo-frame img {
+  width: 100%;
+  max-width: 220px;
+  height: auto;
+  max-height: 220px;
+}
+
+.import-group__nophoto-label {
+  margin: 0;
+}
+
+.import-group__rows {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+@media (min-width: 860px) {
+  .import-group--photo {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .import-group--photo .import-group__photo {
+    flex: 0 0 220px;
+  }
+}
+
 /* ---------- catalog detail ---------- */
 
 .spec-list {

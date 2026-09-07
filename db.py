@@ -335,6 +335,40 @@ def get_staging_item(conn, item_id):
     return dict(row) if row else None
 
 
+def group_staging_items_by_photo(items):
+    """Group staging rows (as returned by list_staging_items) by the photo
+    they were extracted from, preserving each group's and each item's
+    original order.
+
+    Rows sharing the same source_image_path are collected into one group
+    (keyed on that path), so the review page can show one thumbnail next to
+    all the rows it produced. A row with no source_image_path (a text
+    capture from /capture, not a photo upload) is never merged with another
+    row -- each becomes its own single-item, photo-less group, per the
+    plan's requirement that text captures get a distinct no-photo
+    presentation rather than being lumped into a shared "no photo" bucket.
+
+    Each group is {"source_image_path": ..., "rows": [...]} -- deliberately
+    *not* "items", since Jinja's attribute lookup on a plain dict resolves
+    `group.items` to the dict's own .items() method rather than a "items"
+    key, which silently breaks `group.items[0]` in the template.
+    """
+    groups = []
+    group_index_by_path = {}
+    for item in items:
+        path = item.get("source_image_path")
+        if path:
+            index = group_index_by_path.get(path)
+            if index is None:
+                group_index_by_path[path] = len(groups)
+                groups.append({"source_image_path": path, "rows": [item]})
+            else:
+                groups[index]["rows"].append(item)
+        else:
+            groups.append({"source_image_path": None, "rows": [item]})
+    return groups
+
+
 def update_staging_item(conn, item_id, **fields):
     updates = {k: v for k, v in fields.items() if k in _STAGING_FIELDS}
     if not updates:
