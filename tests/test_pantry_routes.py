@@ -38,7 +38,9 @@ def test_increment_button_increases_quantity(client):
     response = client.post(f"/inventory/{item_id}/adjust", data={"delta": "1", "storage": "pantry"})
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/pantry")
+    # Redirects back with a #row-N anchor so the browser scrolls to the item
+    # that was just adjusted, instead of dropping the user at the top.
+    assert response.headers["Location"].endswith(f"/pantry#row-{item_id}")
     assert _db_items()[0]["quantity"] == 3
 
 

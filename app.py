@@ -258,45 +258,140 @@ def create_app():
             active="home",
         )
 
-    def _render_inventory_page(storage):
-        query = request.args.get("q", "").strip().lower()
-        items = db.list_items(get_db(), storage=storage)
-        if query:
-            items = [item for item in items if query in item["name"].lower()]
+    # The four summary views offered above the inventory rows. "all" is the
+    # default and is never put in the query string (a bare /pantry means
+    # "all"); the other three key straight into expiry.split_by_expiry()'s
+    # two buckets and the existing "no section" check, so filtering never
+    # reimplements that logic.
+    INVENTORY_FILTERS = ("all", "expired", "expiring_soon", "unsorted")
+
+    def _render_inventory_page(
+        storage,
+        query=None,
+        filter_key=None,
+        add_error=None,
+        add_values=None,
+        edit_error=None,
+        edit_values=None,
+    ):
+        if query is None:
+            query = request.args.get("q", "")
+        query = query.strip()
+        query_lc = query.lower()
+
+        if filter_key is None:
+            filter_key = request.args.get("filter", "all")
+        if filter_key not in INVENTORY_FILTERS:
+            filter_key = "all"
+
+        raw_items = db.list_items(get_db(), storage=storage)
+        is_storage_empty = not raw_items
+
+        items = (
+            [item for item in raw_items if query_lc in item["name"].lower()]
+            if query_lc
+            else raw_items
+        )
+        # Mutates every dict in `items` in place (effective_expiry,
+        # effective_expiry_estimated, expiry_status) -- expired/expiring_soon
+        # below share those same objects, as does unsectioned_all, so the
+        # rows keep their expiry markers no matter which filter is shown.
         expired, expiring_soon = expiry.split_by_expiry(items, storage=storage)
-        unsectioned = [item for item in items if not item.get("section")]
+        unsectioned_all = [item for item in items if not item.get("section")]
+
+        filtered_items = {
+            "all": items,
+            "expired": expired,
+            "expiring_soon": expiring_soon,
+            "unsorted": unsectioned_all,
+        }[filter_key]
+
         return render_template(
             "inventory.html",
             storage=storage,
             user=current_user.id,
             items=items,
-            groups=sections.group_items(items, storage),
+            groups=sections.group_items(filtered_items, storage),
             all_sections=sections.sections_for(storage),
-            unsectioned=unsectioned[:SECTION_SORTER_BATCH],
-            unsectioned_total=len(unsectioned),
-            expired=expired,
-            expiring_soon=expiring_soon,
+            unsectioned=unsectioned_all[:SECTION_SORTER_BATCH],
+            unsectioned_total=len(unsectioned_all),
+            expired_count=len(expired),
+            expiring_soon_count=len(expiring_soon),
+            is_storage_empty=is_storage_empty,
             query=query,
+            active_filter=filter_key,
+            add_error=add_error,
+            add_values=add_values or {},
+            edit_error=edit_error or {},
+            edit_values=edit_values or {},
             active=storage,
         )
 
+    def _inventory_redirect(storage, query="", filter_key="all", item_id=None):
+        """Redirect back to a storage page, preserving search/filter state.
+
+        Restores `q` and `filter` as query params (when not their defaults)
+        and, when acting on a single row, appends a `#row-N` fragment so the
+        browser scrolls back to it -- this is what keeps an adjust/edit/
+        delete from dropping the user back on the unfiltered top of the list.
+        """
+        kwargs = {}
+        if query:
+            kwargs["q"] = query
+        if filter_key and filter_key != "all":
+            kwargs["filter"] = filter_key
+        anchor = f"row-{item_id}" if item_id is not None else None
+        return redirect(url_for(storage, _anchor=anchor, **kwargs))
+
     def _add_inventory_item(storage):
-        expiry_date = request.form.get("expiry_date", "").strip() or None
-        acquired_date = request.form.get("acquired_date", "").strip() or None
-        shelf_life_days = request.form.get("shelf_life_days", "").strip() or None
+        name = request.form.get("name", "").strip()
+        quantity_raw = request.form.get("quantity", "").strip()
+        query = request.form.get("q", "")
+        filter_key = request.form.get("filter") or "all"
+
+        error = None
+        quantity = None
+        if not name:
+            error = "Give the item a name."
+        elif not quantity_raw:
+            error = "Enter a quantity."
+        else:
+            try:
+                quantity = float(quantity_raw)
+            except ValueError:
+                error = "Quantity must be a number."
+
+        shelf_life_days = None
+        if not error:
+            shelf_life_raw = request.form.get("shelf_life_days", "").strip()
+            if shelf_life_raw:
+                try:
+                    shelf_life_days = int(shelf_life_raw)
+                except ValueError:
+                    error = "Shelf life override must be a whole number of days."
+
+        if error:
+            return _render_inventory_page(
+                storage,
+                query=query,
+                filter_key=filter_key,
+                add_error=error,
+                add_values=request.form,
+            )
+
         db.add_item(
             get_db(),
-            name=request.form["name"].strip(),
-            quantity=float(request.form.get("quantity") or 0),
+            name=name,
+            quantity=quantity,
             unit=request.form.get("unit", "").strip(),
             location=request.form.get("location", "").strip(),
             storage=storage,
-            expiry_date=expiry_date,
-            acquired_date=acquired_date,
-            shelf_life_days=int(shelf_life_days) if shelf_life_days else None,
+            expiry_date=request.form.get("expiry_date", "").strip() or None,
+            acquired_date=request.form.get("acquired_date", "").strip() or None,
+            shelf_life_days=shelf_life_days,
             section=sections.normalize(storage, request.form.get("section")),
         )
-        return redirect(url_for(storage))
+        return _inventory_redirect(storage, query=query, filter_key=filter_key)
 
     @app.route("/pantry")
     @login_required
@@ -318,39 +413,79 @@ def create_app():
     def freezer_add():
         return _add_inventory_item("freezer")
 
-    def _redirect_to_storage_page():
+    def _redirect_to_storage_page(item_id=None):
         storage = request.form.get("storage") or "pantry"
-        return redirect(url_for(storage if storage in ("pantry", "freezer") else "pantry"))
+        if storage not in ("pantry", "freezer"):
+            storage = "pantry"
+        return _inventory_redirect(
+            storage,
+            query=request.form.get("q", "").strip(),
+            filter_key=request.form.get("filter") or "all",
+            item_id=item_id,
+        )
 
     @app.route("/inventory/<int:item_id>/adjust", methods=["POST"])
     @login_required
     def inventory_adjust(item_id):
         db.adjust_quantity(get_db(), item_id, delta=float(request.form["delta"]))
-        return _redirect_to_storage_page()
+        return _redirect_to_storage_page(item_id=item_id)
 
     @app.route("/inventory/<int:item_id>/delete", methods=["POST"])
     @login_required
     def inventory_delete(item_id):
         db.delete_item(get_db(), item_id)
-        return _redirect_to_storage_page()
+        return _redirect_to_storage_page(item_id=item_id)
 
     @app.route("/inventory/<int:item_id>/update", methods=["POST"])
     @login_required
     def inventory_update(item_id):
-        shelf_life_days = request.form.get("shelf_life_days", "").strip()
         storage = request.form.get("storage") or "pantry"
+        if storage not in ("pantry", "freezer"):
+            storage = "pantry"
+        query = request.form.get("q", "")
+        filter_key = request.form.get("filter") or "all"
+
+        quantity_raw = request.form.get("quantity", "").strip()
+        error = None
+        quantity = None
+        if not quantity_raw:
+            error = "Enter a quantity."
+        else:
+            try:
+                quantity = float(quantity_raw)
+            except ValueError:
+                error = "Quantity must be a number."
+
+        shelf_life_days = None
+        if not error:
+            shelf_life_raw = request.form.get("shelf_life_days", "").strip()
+            if shelf_life_raw:
+                try:
+                    shelf_life_days = int(shelf_life_raw)
+                except ValueError:
+                    error = "Shelf life override must be a whole number of days."
+
+        if error:
+            return _render_inventory_page(
+                storage,
+                query=query,
+                filter_key=filter_key,
+                edit_error={"item_id": item_id, "message": error},
+                edit_values=request.form,
+            )
+
         db.update_item(
             get_db(),
             item_id,
-            quantity=float(request.form.get("quantity") or 0),
+            quantity=quantity,
             unit=request.form.get("unit", "").strip(),
             location=request.form.get("location", "").strip(),
             expiry_date=request.form.get("expiry_date", "").strip() or None,
             acquired_date=request.form.get("acquired_date", "").strip() or None,
-            shelf_life_days=int(shelf_life_days) if shelf_life_days else None,
+            shelf_life_days=shelf_life_days,
             section=sections.normalize(storage, request.form.get("section")),
         )
-        return _redirect_to_storage_page()
+        return _redirect_to_storage_page(item_id=item_id)
 
     @app.route("/inventory/sections", methods=["POST"])
     @login_required

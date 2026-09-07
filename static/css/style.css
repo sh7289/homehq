@@ -163,6 +163,22 @@ textarea {
   font-size: 1rem; /* keep >=16px: prevents iOS Safari zooming in on focus */
 }
 
+/* Visually hidden but still announced by assistive tech and reachable by
+   keyboard -- for labels that would be redundant on-screen (a placeholder
+   already shows the same text) but are still needed as the input's
+   accessible name. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---------- shell ---------- */
 
 .shell {
@@ -857,60 +873,65 @@ summary:focus-visible {
   color: var(--ink);
 }
 
-/* ---------- expiry alerts ---------- */
+/* ---------- inventory filter bar ---------- */
+/* Replaces the old always-visible expired/expiring-soon alert lists: a row
+   of summary toggles (All/Past date/Due soon/Unsorted) above the rows,
+   reusing .btn rather than inventing new control styling. */
 
-.alerts {
-  margin-bottom: 1.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-}
-
-.alerts__group-label {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-  margin: 0 0 0.4rem;
-}
-
-.alerts ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.filter-bar {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  margin-bottom: 1.5rem;
 }
 
-.stamp {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-family: var(--font-display);
-  font-size: 0.78rem;
-  letter-spacing: 0.04em;
-  color: var(--rust);
-  border: 2px double var(--rust);
-  border-radius: 3px;
-  padding: 0.3rem 0.6rem;
-  transform: rotate(-2deg);
-  background: rgba(166, 64, 43, 0.06);
+/* ---------- disclosures ---------- */
+/* Shared by the add-item form's "More details", each collapsible section
+   group, and the bulk section-sorter -- native <details>/<summary>, styled
+   like .eyebrow but interactive, matching Task 1's nav disclosure pattern. */
+
+.disclosure {
+  margin: 0.2rem 0 1.1rem;
 }
 
-.tag-soon {
-  display: inline-flex;
+.disclosure__summary {
+  display: flex;
   align-items: center;
-  gap: 0.4rem;
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  color: var(--status-warning-text);
-  border: 1px solid var(--status-warning);
-  border-radius: 999px;
-  padding: 0.25rem 0.65rem;
-  background: rgba(201, 138, 44, 0.08);
+  gap: 0.35rem;
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-soft);
+  padding: 0.5rem 0;
+  min-height: var(--touch-target);
+}
+
+.disclosure__summary::-webkit-details-marker {
+  display: none;
+}
+
+.disclosure__summary::after {
+  content: "\203A"; /* › */
+  color: var(--ink-soft);
+  transition: transform 0.12s ease;
+}
+
+details[open] > .disclosure__summary::after {
+  transform: rotate(90deg);
+}
+
+.section-group {
+  margin: 0;
+}
+
+* + .section-group {
+  margin-top: 1.5rem;
+}
+
+.section-group .rows {
+  margin-top: 0.3rem;
 }
 
 /* ---------- recipes ---------- */
@@ -1131,9 +1152,20 @@ summary:focus-visible {
   border-color: var(--teal);
 }
 
+/* Name/quantity/expiry stacked as one column, so every row lines up the
+   same way regardless of how long its name or meta text is -- actions sit
+   in a second column pushed to the far right by .row__actions's
+   margin-left: auto. */
+.row__info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .row__name {
   font-weight: 600;
-  margin-right: 0.15rem;
 }
 
 .row__meta {
@@ -1160,6 +1192,14 @@ summary:focus-visible {
   align-items: center;
   gap: 0.35rem;
   margin-left: auto;
+}
+
+/* .row__info/.row__actions are shared classes, but this shrink-guard only
+   matters for inventory's two-column row (name/meta/expiry vs. buttons) --
+   scoped to inventory's `.section-group` wrapper so it doesn't change
+   wrapping on shopping list / import review / other pages' `.row` rows. */
+.section-group .row__actions {
+  flex-shrink: 0;
 }
 
 /* ---------- row edit panel ---------- */
@@ -1342,5 +1382,24 @@ summary:focus-visible {
   .row__actions {
     margin-left: 0;
     width: 100%;
+  }
+
+  /* Compact stacked rows on inventory pages only: the name/quantity/expiry
+     column on its own line, actions below it right-aligned -- rather than
+     the desktop's two-column layout squeezed down, which left action
+     buttons wrapping unpredictably next to whichever bit of text happened
+     to run long. Scoped to `.section-group` (inventory-only) so shopping
+     list / import review / other `.row` usages elsewhere are unaffected. */
+  .section-group .row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .section-group .row__info {
+    width: 100%;
+  }
+
+  .section-group .row__actions {
+    justify-content: flex-end;
   }
 }
