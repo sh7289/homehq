@@ -1601,6 +1601,16 @@ details[open] > .disclosure__summary::after {
     font-size: inherit;
     line-height: inherit;
   }
+
+  /* .cook-check already carries .no-print, but the screen-side reveal rule
+     (.is-cooking .cook-check { display: inline-block }, two classes) beats
+     the plain .no-print { display: none } rule above (one class) on
+     specificity -- so if Cook mode is on when the page is printed, the
+     checkbox stays visible. Match its specificity here, inside @media
+     print, so this wins by both specificity and source order. */
+  .is-cooking .cook-check {
+    display: none;
+  }
 }
 
 /* ---------- responsive ---------- */
