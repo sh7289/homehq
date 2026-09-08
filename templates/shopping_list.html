@@ -77,72 +77,78 @@
     {% if purchased_items %}
       <details class="section-group">
         <summary class="disclosure__summary">Purchased &middot; {{ purchased_items|length }}</summary>
-        <form method="post" action="{{ url_for('shopping_list_finish') }}">
-          <ul class="rows">
-            {% for item in review_items %}
-              {% set suggestion = suggestions.get(item.id) %}
-              <li class="row-item">
-                <div class="row">
-                  <form class="inline-form" method="post" action="{{ url_for('shopping_list_toggle_purchased', item_id=item.id) }}">
-                    <input type="checkbox" class="purchase-check" checked onchange="this.form.submit()" aria-label="Unmark {{ item.name }} purchased">
-                  </form>
-                  <div class="row__info">
-                    <span class="row__name">{{ item.name }}</span>
-                    <span class="row__meta">
-                      {{ item.storage|titlecase }}{% if item.quantity_to_buy %} &middot; need {{ item.quantity_to_buy }}{% endif %}{% if item.amount_note %} &middot; {{ item.amount_note }}{% endif %}
-                    </span>
-                    {% if item.source_recipe %}
-                      <span class="row__meta">From {{ item.source_recipe }}</span>
-                    {% endif %}
-                  </div>
-                </div>
-                <div class="edit-panel">
-                  {% if suggestion %}
-                    <p class="eyebrow">Looks like a match</p>
-                    <label>
-                      <input type="radio" name="action-{{ item.id }}" value="match" checked>
-                      Confirm match &rarr; add to &ldquo;{{ suggestion.name }}&rdquo;
-                    </label>
-                    <input type="hidden" name="matched_item_id-{{ item.id }}" value="{{ suggestion.id }}">
-                    <br>
-                    <label>
-                      <input type="radio" name="action-{{ item.id }}" value="new">
-                      Add as new {{ item.storage }} item instead
-                    </label>
-                  {% else %}
-                    <p class="eyebrow">No close match found in {{ item.storage }}</p>
-                    <input type="hidden" name="action-{{ item.id }}" value="new">
+        {# This <form> is deliberately left empty -- HTML forbids nesting a
+           <form> inside another <form>, and each row below already needs
+           its own toggle-purchased <form>. Every review-item field is
+           instead associated with this form by id via the `form="finish-
+           shopping"` attribute (valid HTML5, works regardless of the
+           field's position in the DOM), and the Finish shopping button
+           below does the same. Do not nest anything inside this tag. #}
+        <form id="finish-shopping" method="post" action="{{ url_for('shopping_list_finish') }}"></form>
+        <ul class="rows">
+          {% for item in review_items %}
+            {% set suggestion = suggestions.get(item.id) %}
+            <li class="row-item">
+              <div class="row">
+                <form class="inline-form" method="post" action="{{ url_for('shopping_list_toggle_purchased', item_id=item.id) }}">
+                  <input type="checkbox" class="purchase-check" checked onchange="this.form.submit()" aria-label="Unmark {{ item.name }} purchased">
+                </form>
+                <div class="row__info">
+                  <span class="row__name">{{ item.name }}</span>
+                  <span class="row__meta">
+                    {{ item.storage|titlecase }}{% if item.quantity_to_buy %} &middot; need {{ item.quantity_to_buy }}{% endif %}{% if item.amount_note %} &middot; {{ item.amount_note }}{% endif %}
+                  </span>
+                  {% if item.source_recipe %}
+                    <span class="row__meta">From {{ item.source_recipe }}</span>
                   {% endif %}
-                  <div class="form-row">
-                    <div class="field">
-                      <label for="quantity-{{ item.id }}">Quantity bought</label>
-                      <input id="quantity-{{ item.id }}" type="number" step="any" name="quantity-{{ item.id }}" value="{{ item.quantity_to_buy or 1 }}" required>
-                    </div>
+                </div>
+              </div>
+              <div class="edit-panel">
+                {% if suggestion %}
+                  <p class="eyebrow">Looks like a match</p>
+                  <label>
+                    <input type="radio" form="finish-shopping" name="action-{{ item.id }}" value="match" checked>
+                    Confirm match &rarr; add to &ldquo;{{ suggestion.name }}&rdquo;
+                  </label>
+                  <input type="hidden" form="finish-shopping" name="matched_item_id-{{ item.id }}" value="{{ suggestion.id }}">
+                  <br>
+                  <label>
+                    <input type="radio" form="finish-shopping" name="action-{{ item.id }}" value="new">
+                    Add as new {{ item.storage }} item instead
+                  </label>
+                {% else %}
+                  <p class="eyebrow">No close match found in {{ item.storage }}</p>
+                  <input type="hidden" form="finish-shopping" name="action-{{ item.id }}" value="new">
+                {% endif %}
+                <div class="form-row">
+                  <div class="field">
+                    <label for="quantity-{{ item.id }}">Quantity bought</label>
+                    <input id="quantity-{{ item.id }}" form="finish-shopping" type="number" step="any" name="quantity-{{ item.id }}" value="{{ item.quantity_to_buy or 1 }}" required>
                   </div>
                 </div>
-              </li>
-            {% endfor %}
-            {% for item in fresh_purchased_items %}
-              <li class="row-item">
-                <div class="row">
-                  <form class="inline-form" method="post" action="{{ url_for('shopping_list_toggle_purchased', item_id=item.id) }}">
-                    <input type="checkbox" class="purchase-check" checked onchange="this.form.submit()" aria-label="Unmark {{ item.name }} purchased">
-                  </form>
-                  <div class="row__info">
-                    <span class="row__name">{{ item.name }}</span>
-                    <span class="row__meta">
-                      Fresh &middot; not tracked in inventory{% if item.amount_note %} &middot; {{ item.amount_note }}{% endif %}
-                    </span>
-                    {% if item.source_recipe %}
-                      <span class="row__meta">From {{ item.source_recipe }}</span>
-                    {% endif %}
-                  </div>
+              </div>
+            </li>
+          {% endfor %}
+          {% for item in fresh_purchased_items %}
+            <li class="row-item">
+              <div class="row">
+                <form class="inline-form" method="post" action="{{ url_for('shopping_list_toggle_purchased', item_id=item.id) }}">
+                  <input type="checkbox" class="purchase-check" checked onchange="this.form.submit()" aria-label="Unmark {{ item.name }} purchased">
+                </form>
+                <div class="row__info">
+                  <span class="row__name">{{ item.name }}</span>
+                  <span class="row__meta">
+                    Fresh &middot; not tracked in inventory{% if item.amount_note %} &middot; {{ item.amount_note }}{% endif %}
+                  </span>
+                  {% if item.source_recipe %}
+                    <span class="row__meta">From {{ item.source_recipe }}</span>
+                  {% endif %}
                 </div>
-              </li>
-            {% endfor %}
-          </ul>
-          <button class="btn btn--primary" type="submit">Finish shopping</button>
-        </form>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+        <button class="btn btn--primary" type="submit" form="finish-shopping">Finish shopping</button>
       </details>
     {% endif %}
   </div>

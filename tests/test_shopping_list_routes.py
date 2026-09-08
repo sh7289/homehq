@@ -249,6 +249,64 @@ def test_finish_shopping_ignores_unpurchased_items(client):
     assert len(_shopping_list()) == 1
 
 
+def test_finish_shopping_skips_a_purchased_item_missing_its_action_field(client):
+    """Regression test for a stale/replayed Finish-shopping submission --
+    e.g. a browser back-button resubmit of a page rendered before this item
+    was purchased, or before it even existed. Without its action-<id> field
+    present, the item must be left alone entirely: not reconciled, not
+    turned into a phantom inventory row, and still available for a later,
+    properly-rendered Finish-shopping submission."""
+    _login(client)
+    client.post("/shopping-list/add", data={"name": "Rice", "storage": "pantry"})
+    item_id = _shopping_list()[0]["id"]
+    client.post(f"/shopping-list/{item_id}/toggle-purchased")
+
+    # A Finish-shopping POST that says nothing at all about this item.
+    response = client.post("/shopping-list/finish", data={})
+
+    assert response.status_code == 302
+    assert _db_items() == []
+    remaining = _shopping_list()
+    assert len(remaining) == 1
+    assert remaining[0]["id"] == item_id
+    assert remaining[0]["purchased"] == 1
+    assert remaining[0]["reconciled_at"] is None
+
+    # A later, properly-formed Finish-shopping submission still works.
+    finish_response = client.post(
+        "/shopping-list/finish",
+        data={f"action-{item_id}": "new", f"quantity-{item_id}": "1"},
+    )
+
+    assert finish_response.status_code == 302
+    items = _db_items(storage="pantry")
+    assert len(items) == 1
+    assert items[0]["name"] == "Rice"
+    assert _shopping_list() == []
+
+
+def test_finish_shopping_skips_a_purchased_item_with_an_empty_quantity_field(client):
+    """Same stale-resubmission concern, for the quantity field specifically
+    -- an empty value must not fall back to quantity_to_buy/0 and silently
+    create a phantom row."""
+    _login(client)
+    client.post("/shopping-list/add", data={"name": "Rice", "storage": "pantry"})
+    item_id = _shopping_list()[0]["id"]
+    client.post(f"/shopping-list/{item_id}/toggle-purchased")
+
+    response = client.post(
+        "/shopping-list/finish",
+        data={f"action-{item_id}": "new", f"quantity-{item_id}": ""},
+    )
+
+    assert response.status_code == 302
+    assert _db_items() == []
+    remaining = _shopping_list()
+    assert len(remaining) == 1
+    assert remaining[0]["purchased"] == 1
+    assert remaining[0]["reconciled_at"] is None
+
+
 def test_finish_shopping_twice_does_not_double_increment_inventory(client):
     """The core correctness risk for this task: calling Finish shopping
     twice on the same purchased set must not double-apply the inventory

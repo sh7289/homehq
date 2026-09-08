@@ -723,23 +723,37 @@ def create_app():
         review form rendered on GET /shopping-list -- nothing here computes
         or applies a match on its own; it only carries out whichever action
         the user already selected.
+
+        Stale-resubmission guard: a non-fresh item is only ever claimed and
+        reconciled if this POST actually carries its `action-<id>` field.
+        A field-less submission -- e.g. a browser back-button resubmit of a
+        Finish-shopping page rendered before this item was even purchased,
+        or before it existed -- means the review form never asked about
+        this item, so there's no confirmed choice to act on. Skipping it
+        (rather than defaulting to "new" with a guessed-at quantity) leaves
+        it purchased-but-unreconciled for a future, properly-rendered
+        Finish-shopping submission instead of silently creating a phantom
+        inventory row. Fresh/untracked items have no such field to check --
+        there's no decision for them to submit in the first place.
         """
         conn = get_db()
         for item in db.list_shopping_list_items(conn):
             if not item["purchased"]:
                 continue
-            if not db.claim_shopping_list_item_for_finish(conn, item["id"]):
-                # Already reconciled by an earlier Finish-shopping call --
-                # no-op, do not touch inventory again.
-                continue
 
             if item["storage"] != "fresh":
-                action = request.form.get(f"action-{item['id']}", "new")
-                quantity = float(
-                    request.form.get(f"quantity-{item['id']}")
-                    or item["quantity_to_buy"]
-                    or 0
-                )
+                action_field = f"action-{item['id']}"
+                quantity_field = f"quantity-{item['id']}"
+                if action_field not in request.form or not request.form.get(quantity_field):
+                    continue
+                action = request.form[action_field]
+                quantity = float(request.form[quantity_field])
+
+                if not db.claim_shopping_list_item_for_finish(conn, item["id"]):
+                    # Already reconciled by an earlier Finish-shopping call
+                    # -- no-op, do not touch inventory again.
+                    continue
+
                 if action == "match":
                     matched_item_id = request.form.get(f"matched_item_id-{item['id']}")
                     if matched_item_id:
@@ -753,8 +767,12 @@ def create_app():
                         location="",
                         storage=item["storage"],
                     )
-            # Fresh/untracked items fall straight through to here with no
-            # inventory write -- "completing" one is just removing it.
+            else:
+                if not db.claim_shopping_list_item_for_finish(conn, item["id"]):
+                    continue
+                # Fresh/untracked items fall straight through with no
+                # inventory write -- "completing" one is just removing it.
+
             db.delete_shopping_list_item(conn, item["id"])
 
         return redirect(url_for("shopping_list"))
