@@ -160,6 +160,104 @@
       </section>
     </div>
 
+    {% if ingredients %}
+      <section class="recipe-shop no-print" id="shop">
+        <span class="eyebrow">Add to shopping list</span>
+        <form method="post" action="{{ url_for('recipe_shop', slug=recipe.slug) }}"
+              data-pending-message="Adding to list&hellip;">
+          <input type="hidden" name="serves" value="{{ raw_serves_param }}">
+
+          <ul class="rows">
+            {% for row in shop_fresh_missing %}
+              <li class="row-item">
+                <div class="row">
+                  <input type="checkbox" id="shop-add-{{ row.index }}" name="add-{{ row.index }}" checked>
+                  <div class="row__info">
+                    <label for="shop-add-{{ row.index }}" class="row__name">{{ row.ingredient.name }}</label>
+                    <span class="row__meta">
+                      {%- set amount = [] -%}
+                      {%- if row.ingredient.quantity %}{{- amount.append(row.ingredient.quantity) or '' -}}{% endif -%}
+                      {%- if row.ingredient.unit %}{{- amount.append(row.ingredient.unit) or '' -}}{% endif -%}
+                      {{ amount|join(' ') }}
+                      {% if row.bucket == 'fresh' %}&middot; fresh{% else %}&middot; not in inventory{% endif %}
+                    </span>
+                    {% if row.bucket == 'fresh' and row.match %}
+                      <span class="row__meta">
+                        Pantry says: {{ row.match.name }} &middot; {{ row.match.quantity }}{% if row.match.unit %} {{ row.match.unit }}{% endif %}
+                      </span>
+                    {% endif %}
+                  </div>
+                </div>
+              </li>
+            {% else %}
+              <li class="row">Nothing to add outright — everything below either looks on hand or needs your call.</li>
+            {% endfor %}
+          </ul>
+
+          {% if shop_check %}
+            <details class="section-group">
+              <summary class="disclosure__summary">Check the pantry &middot; {{ shop_check|length }}</summary>
+              <ul class="rows">
+                {% for row in shop_check %}
+                  <li class="row-item">
+                    <div class="row">
+                      <div class="row__info">
+                        <span class="row__name">{{ row.ingredient.name }}</span>
+                        <span class="row__meta">
+                          {%- set amount = [] -%}
+                          {%- if row.ingredient.quantity %}{{- amount.append(row.ingredient.quantity) or '' -}}{% endif -%}
+                          {%- if row.ingredient.unit %}{{- amount.append(row.ingredient.unit) or '' -}}{% endif -%}
+                          Recipe needs: {{ amount|join(' ') }}
+                        </span>
+                        <span class="row__meta">
+                          {{ row.match.storage|titlecase }} says: {{ row.match.name }} &middot; {{ row.match.quantity }}{% if row.match.unit %} {{ row.match.unit }}{% endif %}
+                        </span>
+                      </div>
+                    </div>
+                    <div class="edit-panel">
+                      <label>
+                        <input type="radio" name="check-{{ row.index }}" value="have">
+                        Have enough
+                      </label>
+                      <br>
+                      <label>
+                        <input type="radio" name="check-{{ row.index }}" value="add">
+                        Add to list
+                      </label>
+                    </div>
+                  </li>
+                {% endfor %}
+              </ul>
+            </details>
+          {% endif %}
+
+          {% if shop_on_hand %}
+            <details class="section-group">
+              <summary class="disclosure__summary">On hand, assumed enough &middot; {{ shop_on_hand|length }}</summary>
+              <ul class="rows">
+                {% for row in shop_on_hand %}
+                  <li class="row-item">
+                    <div class="row">
+                      <input type="checkbox" id="shop-add-{{ row.index }}" name="add-{{ row.index }}">
+                      <div class="row__info">
+                        <label for="shop-add-{{ row.index }}" class="row__name">{{ row.ingredient.name }}</label>
+                        <span class="row__meta">
+                          {{ row.match.storage|titlecase }} says: {{ row.match.name }} &middot; {{ row.match.quantity }}{% if row.match.unit %} {{ row.match.unit }}{% endif %}
+                        </span>
+                      </div>
+                    </div>
+                  </li>
+                {% endfor %}
+              </ul>
+            </details>
+          {% endif %}
+
+          <button class="btn btn--primary" type="submit">Add selected to shopping list</button>
+        </form>
+        <p class="status-live" aria-live="polite" role="status"></p>
+      </section>
+    {% endif %}
+
     {% if recipe.body %}
       <span class="eyebrow">Notes</span>
       <div class="recipe-body">

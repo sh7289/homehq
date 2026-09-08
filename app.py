@@ -34,6 +34,7 @@ import db
 import export_csv
 import expiry
 import matching
+import pantry_check
 import recipe_loader
 import recipe_scale
 import recipe_steps
@@ -1421,6 +1422,27 @@ def create_app():
 
         return _render_ingredient_editor(recipe, proposed, suggested=True)
 
+    def _combined_inventory(conn):
+        """Pantry + freezer rows in one pool -- a recipe doesn't care where
+        an ingredient lives, so matching.find_best_match is asked to
+        consider both at once (see pantry_check.check_ingredients)."""
+        return db.list_items(conn, storage="pantry") + db.list_items(conn, storage="freezer")
+
+    def _ingredient_amount_note(ingredient):
+        """The recipe's own (already-scaled, if applicable) amount as plain
+        text, e.g. "2 cups" -- the same join the ingredient list itself
+        uses. None when there's nothing recorded, rather than fabricating
+        a placeholder."""
+        parts = []
+        if ingredient.get("quantity"):
+            parts.append(str(ingredient["quantity"]))
+        if ingredient.get("unit"):
+            parts.append(str(ingredient["unit"]))
+        return " ".join(parts) if parts else None
+
+    def _recipe_source_label(recipe):
+        return f"{recipe.name} ({recipe.slug})"
+
     @app.route("/recipes/<slug>")
     @login_required
     def recipe_detail(slug):
@@ -1441,6 +1463,21 @@ def create_app():
             int(float(target)) if factor != 1 and target else base_serves
         )
         view = request.args.get("view")
+
+        conn = get_db()
+        shop_rows = pantry_check.check_ingredients(ingredients, _combined_inventory(conn))
+        # The field names the shop-panel form posts back (add-<n>/check-<n>)
+        # are keyed on this row's position, so the template needs it
+        # alongside each row -- and recipe_shop below rebuilds the very
+        # same list, in the same order, so the indices line up on submit.
+        for index, row in enumerate(shop_rows):
+            row["index"] = index
+        # Grouped here (rather than with Jinja selectattr chains) so the
+        # bucket->section mapping lives in one obvious place.
+        shop_fresh_missing = [r for r in shop_rows if r["bucket"] in ("fresh", "missing")]
+        shop_on_hand = [r for r in shop_rows if r["bucket"] == "on_hand"]
+        shop_check = [r for r in shop_rows if r["bucket"] == "check"]
+
         return render_template(
             "recipe_detail.html",
             recipe=recipe,
@@ -1454,8 +1491,74 @@ def create_app():
             shown_serves=shown_serves,
             scaled=factor != 1,
             scale_choices=[1, 2, 4, 6, 8],
+            shop_fresh_missing=shop_fresh_missing,
+            shop_on_hand=shop_on_hand,
+            shop_check=shop_check,
+            raw_serves_param=request.args.get("serves", ""),
             active="recipes",
         )
+
+    @app.route("/recipes/<slug>/shop", methods=["POST"])
+    @login_required
+    def recipe_shop(slug):
+        """Add the ingredients the user selected on the recipe-detail
+        bucket panel to the shopping list. Only writes to the shopping
+        list -- inventory is never touched here (see pantry_check.py and
+        the plan's four-bucket design).
+
+        Buckets are recomputed here (against whatever inventory looks like
+        right now, same as the GET page) purely to know each selected
+        ingredient's matched storage, if any -- the actual add/don't-add
+        decision comes entirely from which form fields the user's
+        submission carries, never from the bucket itself. A Check-bucket
+        ingredient is only added when its own `check-<n>` field is
+        explicitly "add"; leaving it unresolved (no field, or "have") never
+        adds it. Fresh/on_hand/missing ingredients are only added when
+        their `add-<n>` checkbox is present in the submission -- so an
+        unchecked Fresh or Missing row (even though both start pre-checked
+        in the UI) is just as excluded as one the user never saw.
+        """
+        recipe = app.recipes.get(slug)
+        if recipe is None:
+            abort(404)
+
+        conn = get_db()
+        base_serves = recipe.frontmatter.get("serves")
+        target = request.form.get("serves") or None
+        factor = recipe_scale.factor_for(base_serves, target)
+        ingredients = (
+            recipe_scale.scale(recipe.ingredients, factor)
+            if factor != 1
+            else recipe.ingredients
+        )
+
+        rows = pantry_check.check_ingredients(ingredients, _combined_inventory(conn))
+        source_recipe = _recipe_source_label(recipe)
+
+        for index, row in enumerate(rows):
+            if row["bucket"] == "check":
+                selected = request.form.get(f"check-{index}") == "add"
+            else:
+                selected = f"add-{index}" in request.form
+            if not selected:
+                continue
+
+            if row["bucket"] == "fresh":
+                storage = "fresh"
+            elif row["match"] is not None:
+                storage = row["match"]["storage"]
+            else:
+                storage = "pantry"
+
+            db.add_shopping_list_item(
+                conn,
+                name=row["ingredient"]["name"],
+                storage=storage,
+                amount_note=_ingredient_amount_note(row["ingredient"]),
+                source_recipe=source_recipe,
+            )
+
+        return redirect(url_for("recipe_detail", slug=slug, serves=target))
 
     @app.route("/capture", methods=["GET", "POST"])
     @login_required
