@@ -54,6 +54,58 @@ def test_delete_removes_shopping_list_item(client):
     assert _shopping_list() == []
 
 
+def test_delete_shows_an_undo_banner_and_restore_brings_the_item_back(client):
+    _login(client)
+    client.post(
+        "/shopping-list/add", data={"name": "Rice", "storage": "pantry", "quantity_to_buy": "2"}
+    )
+    item_id = _shopping_list()[0]["id"]
+
+    delete_response = client.post(f"/shopping-list/{item_id}/delete", follow_redirects=True)
+
+    assert _shopping_list() == []
+    body = delete_response.data.decode()
+    assert "Removed" in body
+    assert "Rice" in body
+    assert f"/shopping-list/{item_id}/restore" in body
+
+    restore_response = client.post(f"/shopping-list/{item_id}/restore", follow_redirects=True)
+
+    assert restore_response.status_code == 200
+    restored = _shopping_list()
+    assert len(restored) == 1
+    assert restored[0]["id"] == item_id
+    assert restored[0]["name"] == "Rice"
+    assert restored[0]["quantity_to_buy"] == 2
+
+
+def test_double_restore_via_the_route_does_not_duplicate_the_shopping_list_item(client):
+    _login(client)
+    client.post("/shopping-list/add", data={"name": "Rice", "storage": "pantry"})
+    item_id = _shopping_list()[0]["id"]
+    client.post(f"/shopping-list/{item_id}/delete")
+
+    client.post(f"/shopping-list/{item_id}/restore")
+    client.post(f"/shopping-list/{item_id}/restore")
+
+    assert len(_shopping_list()) == 1
+
+
+def test_unrelated_shopping_list_item_survives_delete_and_undo_of_another(client):
+    _login(client)
+    client.post("/shopping-list/add", data={"name": "Beans", "storage": "pantry"})
+    client.post("/shopping-list/add", data={"name": "Rice", "storage": "pantry"})
+    items = {item["name"]: item for item in _shopping_list()}
+    rice_id = items["Rice"]["id"]
+
+    client.post(f"/shopping-list/{rice_id}/delete")
+    client.post(f"/shopping-list/{rice_id}/restore")
+
+    by_name = {item["name"]: item for item in _shopping_list()}
+    assert "Beans" in by_name
+    assert "Rice" in by_name
+
+
 def test_resolve_as_match_increments_existing_item_and_clears_list(client):
     _login(client)
     client.post(

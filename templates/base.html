@@ -133,6 +133,17 @@
 
   <script>
     (function () {
+      // Accessible error summary (Task 13, see _error_summary.html): when a
+      // validation failure renders the role="alert" #error-summary block,
+      // move keyboard focus to it -- its tabindex="-1" makes it focusable
+      // without adding it to the normal tab order -- so a keyboard/screen
+      // reader user lands on "what went wrong" immediately after the failed
+      // submit instead of having to hunt the re-rendered page for it.
+      var errorSummary = document.getElementById("error-summary");
+      if (errorSummary) errorSummary.focus();
+    })();
+
+    (function () {
       // Keeps aria-expanded/aria-controls in sync on the shared "edit panel"
       // disclosure pattern (a button with .js-edit-toggle + data-target
       // toggles a panel's `hidden` attribute -- used by inventory, catalog

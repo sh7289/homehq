@@ -763,6 +763,60 @@ summary:focus-visible {
   border-color: var(--status-warning);
 }
 
+/* A .notice with an action alongside its message (e.g. the Undo button after
+   an inventory/shopping-list delete -- see inventory.html/shopping_list.html). */
+.notice--action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* Accessible error summary (shared _error_summary.html partial): a
+   role="alert" landmark listing every field-linked validation error.
+   Same shape as .form-error, since it's the same "something's wrong"
+   affordance, just with links out to each field. base.html moves keyboard
+   focus here right after a failed submit (see its focus-summary script). */
+.error-summary {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--rust);
+  background: rgba(166, 64, 43, 0.08);
+  border: 1px solid rgba(166, 64, 43, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 1.1rem;
+}
+
+.error-summary:focus {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.error-summary__heading {
+  font-weight: 600;
+  margin: 0 0 0.3rem;
+}
+
+.error-summary__list {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.error-summary__list a {
+  color: var(--rust);
+}
+
+/* Inline per-field message, rendered next to the field it describes -- in
+   addition to (not instead of) the summary above. */
+.field-error {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--rust);
+  margin: 0.2rem 0 0;
+}
+
 /* ---------- buttons ---------- */
 
 .btn {

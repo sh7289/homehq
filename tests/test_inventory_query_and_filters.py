@@ -407,6 +407,81 @@ def test_update_item_with_non_numeric_quantity_shows_error(client, app):
     assert _db_items()[0]["quantity"] == 1
 
 
+# ---------- accessible error summary (Task 13) ----------
+
+
+def test_add_item_error_summary_links_to_the_invalid_field(client):
+    _login(client)
+
+    response = client.post(
+        "/pantry/add",
+        data={"name": "", "quantity": "2", "unit": "bags"},
+    )
+
+    body = response.data.decode()
+    # An accessible role="alert" landmark, focusable (tabindex="-1", moved
+    # to by base.html's script) rather than just a bare paragraph.
+    assert 'role="alert"' in body
+    assert 'id="error-summary"' in body
+    assert 'tabindex="-1"' in body
+    # Its entry links directly to the invalid field...
+    assert 'href="#name"' in body
+    # ...and the field itself carries a matching inline message.
+    assert 'aria-describedby="name-error"' in body
+    assert 'aria-invalid="true"' in body
+    assert 'id="name-error"' in body
+    assert "Give the item a name." in body
+
+
+def test_update_item_error_summary_links_to_the_row_specific_field(client, app):
+    conn = _conn(app)
+    item_id = db.add_item(conn, name="cumin", quantity=1, unit="jar", location="")
+    conn.close()
+    _login(client)
+
+    response = client.post(
+        f"/inventory/{item_id}/update",
+        data={"storage": "pantry", "quantity": "", "unit": "jar"},
+    )
+
+    body = response.data.decode()
+    assert 'role="alert"' in body
+    # The edit-row error summary links to this row's own field id, not the
+    # add form's plain "quantity" id -- so it points at the right control
+    # when several rows could in principle be mid-edit.
+    assert f'href="#quantity-{item_id}"' in body
+    assert f'aria-describedby="quantity-{item_id}-error"' in body
+    assert f'id="quantity-{item_id}-error"' in body
+
+
+def test_error_summary_does_not_drop_a_long_forms_retained_values(client):
+    """A multi-field form using the new summary pattern still keeps every
+    already-entered value on a validation failure (Task 2 behavior, now
+    verified with the summary layered on top)."""
+    _login(client)
+
+    response = client.post(
+        "/pantry/add",
+        data={
+            "name": "",
+            "quantity": "3",
+            "unit": "bags",
+            "location": "top shelf",
+            "expiry_date": "2027-01-01",
+            "acquired_date": "2026-06-01",
+            "shelf_life_days": "42",
+        },
+    )
+
+    body = response.data.decode()
+    assert 'name="quantity" value="3"' in body
+    assert 'name="unit" value="bags"' in body
+    assert 'name="location" value="top shelf"' in body
+    assert 'name="expiry_date" value="2027-01-01"' in body
+    assert 'name="acquired_date" value="2026-06-01"' in body
+    assert 'name="shelf_life_days" value="42"' in body
+
+
 # ---------- bulk section-sorter is now its own opt-in mode ----------
 
 

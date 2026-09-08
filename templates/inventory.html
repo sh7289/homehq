@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_error_summary.html" import error_summary, field_message, field_attrs %}
 {% block title %}{{ storage|capitalize }} – Home HQ{% endblock %}
 {% block content %}
   <div class="card">
@@ -11,6 +12,18 @@
     <hr class="card__rule">
     <p class="card__meta">Logged in as {{ user }} &middot; {{ items|length }} item{{ '' if items|length == 1 else 's' }}</p>
 
+    {% if undo_id %}
+      <div class="notice notice--success notice--action" aria-live="polite" role="status">
+        <span>Removed &ldquo;{{ undo_name or 'that item' }}&rdquo;.</span>
+        <form class="inline-form" method="post" action="{{ url_for('inventory_restore', item_id=undo_id) }}">
+          <input type="hidden" name="storage" value="{{ storage }}">
+          <input type="hidden" name="q" value="{{ query }}">
+          <input type="hidden" name="filter" value="{{ active_filter }}">
+          <button class="btn btn--sm" type="submit">Undo</button>
+        </form>
+      </div>
+    {% endif %}
+
     <form class="search-bar" method="get" action="{{ url_for(storage) }}">
       <label class="visually-hidden" for="q">Search {{ storage }}</label>
       <input id="q" type="search" name="q" value="{{ query }}" placeholder="Search {{ storage }}&hellip;">
@@ -22,15 +35,17 @@
     <form method="post" action="{{ url_for(storage + '_add') }}">
       <input type="hidden" name="q" value="{{ query }}">
       <input type="hidden" name="filter" value="{{ active_filter }}">
-      {% if add_error %}<p class="form-error">{{ add_error }}</p>{% endif %}
+      {{ error_summary(add_errors) }}
       <div class="form-row">
         <div class="field">
           <label for="name">Name</label>
-          <input id="name" type="text" name="name" value="{{ add_values.get('name', '') }}" required>
+          <input id="name" type="text" name="name" value="{{ add_values.get('name', '') }}" required {{ field_attrs(add_errors_by_field, 'name') }}>
+          {{ field_message(add_errors_by_field, 'name') }}
         </div>
         <div class="field">
           <label for="quantity">Quantity</label>
-          <input id="quantity" type="number" step="any" name="quantity" value="{{ add_values.get('quantity', '') }}" required>
+          <input id="quantity" type="number" step="any" name="quantity" value="{{ add_values.get('quantity', '') }}" required {{ field_attrs(add_errors_by_field, 'quantity') }}>
+          {{ field_message(add_errors_by_field, 'quantity') }}
         </div>
         <div class="field">
           <label for="unit">Unit</label>
@@ -45,7 +60,7 @@
           </select>
         </div>
       </div>
-      <details class="disclosure" {{ 'open' if add_error else '' }}>
+      <details class="disclosure" {{ 'open' if add_errors else '' }}>
         <summary class="disclosure__summary">More details</summary>
         <div class="form-row">
           <div class="field">
@@ -62,7 +77,8 @@
           </div>
           <div class="field">
             <label for="shelf_life_days">Shelf life override (days)</label>
-            <input id="shelf_life_days" type="number" min="1" name="shelf_life_days" value="{{ add_values.get('shelf_life_days', '') }}" placeholder="{{ '1095 default' if storage == 'pantry' else '365 default' }}">
+            <input id="shelf_life_days" type="number" min="1" name="shelf_life_days" value="{{ add_values.get('shelf_life_days', '') }}" placeholder="{{ '1095 default' if storage == 'pantry' else '365 default' }}" {{ field_attrs(add_errors_by_field, 'shelf_life_days') }}>
+            {{ field_message(add_errors_by_field, 'shelf_life_days') }}
           </div>
         </div>
       </details>
@@ -123,7 +139,7 @@
                 </span>
               </div>
               <div class="edit-panel" id="edit-{{ item.id }}" {{ '' if is_erroring else 'hidden' }}>
-                {% if is_erroring %}<p class="form-error">{{ edit_error.get('message') }}</p>{% endif %}
+                {% if is_erroring %}{{ error_summary(edit_error.get('errors'), heading="Please fix the following before saving:") }}{% endif %}
                 <form method="post" action="{{ url_for('inventory_update', item_id=item.id) }}">
                   <input type="hidden" name="storage" value="{{ storage }}">
                   <input type="hidden" name="q" value="{{ query }}">
@@ -131,7 +147,8 @@
                   <div class="form-row">
                     <div class="field">
                       <label for="quantity-{{ item.id }}">Quantity</label>
-                      <input id="quantity-{{ item.id }}" type="number" step="any" name="quantity" value="{{ ev.get('quantity', '') }}" required>
+                      <input id="quantity-{{ item.id }}" type="number" step="any" name="quantity" value="{{ ev.get('quantity', '') }}" required {{ field_attrs(edit_errors_by_field, 'quantity-' ~ item.id) }}>
+                      {{ field_message(edit_errors_by_field, 'quantity-' ~ item.id) }}
                     </div>
                     <div class="field">
                       <label for="unit-{{ item.id }}">Unit</label>
@@ -153,7 +170,8 @@
                     </div>
                     <div class="field">
                       <label for="shelf-life-{{ item.id }}">Shelf life override (days)</label>
-                      <input id="shelf-life-{{ item.id }}" type="number" min="1" name="shelf_life_days" value="{{ ev.get('shelf_life_days') or '' }}" placeholder="{{ '1095 default' if storage == 'pantry' else '365 default' }}">
+                      <input id="shelf-life-{{ item.id }}" type="number" min="1" name="shelf_life_days" value="{{ ev.get('shelf_life_days') or '' }}" placeholder="{{ '1095 default' if storage == 'pantry' else '365 default' }}" {{ field_attrs(edit_errors_by_field, 'shelf-life-' ~ item.id) }}>
+                      {{ field_message(edit_errors_by_field, 'shelf-life-' ~ item.id) }}
                     </div>
                   </div>
                   <div class="form-row">

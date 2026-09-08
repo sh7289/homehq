@@ -6,6 +6,15 @@
     <hr class="card__rule">
     <p class="card__meta">{{ list_items|length }} item{{ '' if list_items|length == 1 else 's' }} to buy</p>
 
+    {% if undo_id %}
+      <div class="notice notice--success notice--action" aria-live="polite" role="status">
+        <span>Removed &ldquo;{{ undo_name or 'that item' }}&rdquo;.</span>
+        <form class="inline-form" method="post" action="{{ url_for('shopping_list_restore', item_id=undo_id) }}">
+          <button class="btn btn--sm" type="submit">Undo</button>
+        </form>
+      </div>
+    {% endif %}
+
     <ul class="rows">
       {% for item in list_items %}
         {% set suggestion = suggestions.get(item.id) %}

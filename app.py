@@ -298,10 +298,12 @@ def create_app():
         storage,
         query=None,
         filter_key=None,
-        add_error=None,
+        add_errors=None,
         add_values=None,
         edit_error=None,
         edit_values=None,
+        undo_id=None,
+        undo_name=None,
     ):
         if query is None:
             query = request.args.get("q", "")
@@ -312,6 +314,27 @@ def create_app():
             filter_key = request.args.get("filter", "all")
         if filter_key not in INVENTORY_FILTERS:
             filter_key = "all"
+
+        # Undo affordance (see inventory_delete): a one-shot indicator carried
+        # as query params on the redirect that follows a delete. There's no
+        # separate time-based expiry -- the banner is only ever rendered on
+        # this one page render, and restoring stays valid for as long as the
+        # row is still soft-deleted (see db.restore_item's docstring).
+        if undo_id is None:
+            raw_undo_id = request.args.get("undo_id")
+            try:
+                undo_id = int(raw_undo_id) if raw_undo_id else None
+            except (TypeError, ValueError):
+                undo_id = None
+        if undo_name is None:
+            undo_name = request.args.get("undo_name")
+
+        add_errors = add_errors or []
+        add_errors_by_field = {err["field_id"]: err["message"] for err in add_errors}
+
+        edit_error = edit_error or {}
+        edit_errors = edit_error.get("errors") or []
+        edit_errors_by_field = {err["field_id"]: err["message"] for err in edit_errors}
 
         raw_items = db.list_items(get_db(), storage=storage)
         is_storage_empty = not raw_items
@@ -349,26 +372,39 @@ def create_app():
             is_storage_empty=is_storage_empty,
             query=query,
             active_filter=filter_key,
-            add_error=add_error,
+            add_errors=add_errors,
+            add_errors_by_field=add_errors_by_field,
             add_values=add_values or {},
-            edit_error=edit_error or {},
+            edit_error=edit_error,
+            edit_errors_by_field=edit_errors_by_field,
             edit_values=edit_values or {},
+            undo_id=undo_id,
+            undo_name=undo_name,
             active=storage,
         )
 
-    def _inventory_redirect(storage, query="", filter_key="all", item_id=None):
+    def _inventory_redirect(
+        storage, query="", filter_key="all", item_id=None, undo_id=None, undo_name=None
+    ):
         """Redirect back to a storage page, preserving search/filter state.
 
         Restores `q` and `filter` as query params (when not their defaults)
         and, when acting on a single row, appends a `#row-N` fragment so the
         browser scrolls back to it -- this is what keeps an adjust/edit/
         delete from dropping the user back on the unfiltered top of the list.
+
+        `undo_id`/`undo_name`, when given, carry the just-deleted item's
+        identity as one-shot query params so the very next render can show
+        the Undo banner -- see _render_inventory_page and inventory_delete.
         """
         kwargs = {}
         if query:
             kwargs["q"] = query
         if filter_key and filter_key != "all":
             kwargs["filter"] = filter_key
+        if undo_id is not None:
+            kwargs["undo_id"] = undo_id
+            kwargs["undo_name"] = undo_name
         anchor = f"row-{item_id}" if item_id is not None else None
         return redirect(url_for(storage, _anchor=anchor, **kwargs))
 
@@ -378,33 +414,38 @@ def create_app():
         query = request.form.get("q", "")
         filter_key = request.form.get("filter") or "all"
 
-        error = None
+        errors = []
         quantity = None
         if not name:
-            error = "Give the item a name."
+            errors.append({"field_id": "name", "message": "Give the item a name."})
         elif not quantity_raw:
-            error = "Enter a quantity."
+            errors.append({"field_id": "quantity", "message": "Enter a quantity."})
         else:
             try:
                 quantity = float(quantity_raw)
             except ValueError:
-                error = "Quantity must be a number."
+                errors.append({"field_id": "quantity", "message": "Quantity must be a number."})
 
         shelf_life_days = None
-        if not error:
+        if not errors:
             shelf_life_raw = request.form.get("shelf_life_days", "").strip()
             if shelf_life_raw:
                 try:
                     shelf_life_days = int(shelf_life_raw)
                 except ValueError:
-                    error = "Shelf life override must be a whole number of days."
+                    errors.append(
+                        {
+                            "field_id": "shelf_life_days",
+                            "message": "Shelf life override must be a whole number of days.",
+                        }
+                    )
 
-        if error:
+        if errors:
             return _render_inventory_page(
                 storage,
                 query=query,
                 filter_key=filter_key,
-                add_error=error,
+                add_errors=errors,
                 add_values=request.form,
             )
 
@@ -442,7 +483,7 @@ def create_app():
     def freezer_add():
         return _add_inventory_item("freezer")
 
-    def _redirect_to_storage_page(item_id=None):
+    def _redirect_to_storage_page(item_id=None, undo_id=None, undo_name=None):
         storage = request.form.get("storage") or "pantry"
         if storage not in ("pantry", "freezer"):
             storage = "pantry"
@@ -451,6 +492,8 @@ def create_app():
             query=request.form.get("q", "").strip(),
             filter_key=request.form.get("filter") or "all",
             item_id=item_id,
+            undo_id=undo_id,
+            undo_name=undo_name,
         )
 
     @app.route("/inventory/<int:item_id>/adjust", methods=["POST"])
@@ -462,7 +505,23 @@ def create_app():
     @app.route("/inventory/<int:item_id>/delete", methods=["POST"])
     @login_required
     def inventory_delete(item_id):
-        db.delete_item(get_db(), item_id)
+        conn = get_db()
+        # Fetched before the soft-delete purely to carry the item's name
+        # through to the Undo banner on the next render -- the row itself
+        # isn't touched by this lookup.
+        item = db.get_item(conn, item_id)
+        db.delete_item(conn, item_id)
+        return _redirect_to_storage_page(
+            undo_id=item_id, undo_name=item["name"] if item else None
+        )
+
+    @app.route("/inventory/<int:item_id>/restore", methods=["POST"])
+    @login_required
+    def inventory_restore(item_id):
+        """Undo an inventory delete. See db.restore_item for the idempotency
+        and undo-window notes -- there's no separate time-based expiry here;
+        this is accepted for as long as the row is still soft-deleted."""
+        db.restore_item(get_db(), item_id)
         return _redirect_to_storage_page(item_id=item_id)
 
     @app.route("/inventory/<int:item_id>/update", methods=["POST"])
@@ -475,31 +534,38 @@ def create_app():
         filter_key = request.form.get("filter") or "all"
 
         quantity_raw = request.form.get("quantity", "").strip()
-        error = None
+        errors = []
         quantity = None
         if not quantity_raw:
-            error = "Enter a quantity."
+            errors.append({"field_id": f"quantity-{item_id}", "message": "Enter a quantity."})
         else:
             try:
                 quantity = float(quantity_raw)
             except ValueError:
-                error = "Quantity must be a number."
+                errors.append(
+                    {"field_id": f"quantity-{item_id}", "message": "Quantity must be a number."}
+                )
 
         shelf_life_days = None
-        if not error:
+        if not errors:
             shelf_life_raw = request.form.get("shelf_life_days", "").strip()
             if shelf_life_raw:
                 try:
                     shelf_life_days = int(shelf_life_raw)
                 except ValueError:
-                    error = "Shelf life override must be a whole number of days."
+                    errors.append(
+                        {
+                            "field_id": f"shelf-life-{item_id}",
+                            "message": "Shelf life override must be a whole number of days.",
+                        }
+                    )
 
-        if error:
+        if errors:
             return _render_inventory_page(
                 storage,
                 query=query,
                 filter_key=filter_key,
-                edit_error={"item_id": item_id, "message": error},
+                edit_error={"item_id": item_id, "errors": errors},
                 edit_values=request.form,
             )
 
@@ -543,10 +609,20 @@ def create_app():
             suggestions[list_item["id"]] = matching.find_best_match(
                 list_item["name"], candidates
             )
+        # Undo affordance (see shopping_list_delete): same one-shot query-param
+        # pattern as the inventory pages -- no separate time-based expiry,
+        # the banner is only ever rendered on this one page render.
+        raw_undo_id = request.args.get("undo_id")
+        try:
+            undo_id = int(raw_undo_id) if raw_undo_id else None
+        except (TypeError, ValueError):
+            undo_id = None
         return render_template(
             "shopping_list.html",
             list_items=list_items,
             suggestions=suggestions,
+            undo_id=undo_id,
+            undo_name=request.args.get("undo_name"),
             active="shopping-list",
         )
 
@@ -565,7 +641,27 @@ def create_app():
     @app.route("/shopping-list/<int:item_id>/delete", methods=["POST"])
     @login_required
     def shopping_list_delete(item_id):
-        db.delete_shopping_list_item(get_db(), item_id)
+        conn = get_db()
+        # Fetched before the soft-delete purely to carry the item's name
+        # through to the Undo banner on the next render.
+        item = db.get_shopping_list_item(conn, item_id)
+        db.delete_shopping_list_item(conn, item_id)
+        return redirect(
+            url_for(
+                "shopping_list",
+                undo_id=item_id,
+                undo_name=item["name"] if item else None,
+            )
+        )
+
+    @app.route("/shopping-list/<int:item_id>/restore", methods=["POST"])
+    @login_required
+    def shopping_list_restore(item_id):
+        """Undo a shopping-list removal. See db.restore_shopping_list_item for
+        the idempotency and undo-window notes -- there's no separate
+        time-based expiry here; this is accepted for as long as the row is
+        still soft-deleted."""
+        db.restore_shopping_list_item(get_db(), item_id)
         return redirect(url_for("shopping_list"))
 
     @app.route("/shopping-list/<int:item_id>/resolve", methods=["POST"])

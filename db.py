@@ -35,6 +35,12 @@ def init_db(conn):
         # Nullable on purpose: existing backfilled rows stay untouched and
         # render under "Other" until they're sorted.
         conn.execute("ALTER TABLE pantry_items ADD COLUMN section TEXT")
+    if "deleted_at" not in existing_columns:
+        # Soft-delete marker: NULL means live. Deleting sets a timestamp
+        # instead of running a hard DELETE, so a delete can be undone by
+        # clearing it back to NULL (see restore_item). Every read query
+        # against pantry_items must filter `deleted_at IS NULL`.
+        conn.execute("ALTER TABLE pantry_items ADD COLUMN deleted_at TEXT")
 
     conn.execute(
         """
@@ -47,6 +53,12 @@ def init_db(conn):
         )
         """
     )
+    shopping_list_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(shopping_list_items)")
+    }
+    if "deleted_at" not in shopping_list_columns:
+        # Same soft-delete marker as pantry_items -- see the comment there.
+        conn.execute("ALTER TABLE shopping_list_items ADD COLUMN deleted_at TEXT")
 
     conn.execute(
         """
@@ -193,12 +205,28 @@ def add_item(
 
 def list_items(conn, storage=None):
     if storage is None:
-        rows = conn.execute("SELECT * FROM pantry_items ORDER BY name").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM pantry_items WHERE deleted_at IS NULL ORDER BY name"
+        ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM pantry_items WHERE storage = ? ORDER BY name", (storage,)
+            "SELECT * FROM pantry_items WHERE storage = ? AND deleted_at IS NULL "
+            "ORDER BY name",
+            (storage,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def get_item(conn, item_id):
+    """Fetch one pantry row by id regardless of soft-delete state.
+
+    Unlike list_items, this deliberately does not filter on deleted_at: it
+    backs the delete route's "what was this called?" lookup (needed to show
+    the Undo affordance right after a soft-delete, when the row is no longer
+    live) as well as the restore route.
+    """
+    row = conn.execute("SELECT * FROM pantry_items WHERE id = ?", (item_id,)).fetchone()
+    return dict(row) if row else None
 
 
 def adjust_quantity(conn, item_id, delta):
@@ -249,8 +277,24 @@ def set_section(conn, item_id, section):
 
 
 def delete_item(conn, item_id):
+    """Soft-delete: mark the row deleted_at rather than removing it, so a
+    subsequent restore_item can undo this exact delete."""
     with conn:
-        conn.execute("DELETE FROM pantry_items WHERE id = ?", (item_id,))
+        conn.execute(
+            "UPDATE pantry_items SET deleted_at = ? WHERE id = ?", (_now(), item_id)
+        )
+
+
+def restore_item(conn, item_id):
+    """Undo a soft-delete by clearing deleted_at back to NULL.
+
+    Idempotent by construction: this is always an UPDATE on the same row,
+    never a re-INSERT, so calling it again on an already-restored (or
+    never-deleted) row just re-sets deleted_at to NULL a second time -- no
+    duplicate row is ever created.
+    """
+    with conn:
+        conn.execute("UPDATE pantry_items SET deleted_at = NULL WHERE id = ?", (item_id,))
 
 
 def add_shopping_list_item(conn, name, storage="pantry", quantity_to_buy=None):
@@ -264,11 +308,15 @@ def add_shopping_list_item(conn, name, storage="pantry", quantity_to_buy=None):
 
 
 def list_shopping_list_items(conn):
-    rows = conn.execute("SELECT * FROM shopping_list_items ORDER BY created_at").fetchall()
+    rows = conn.execute(
+        "SELECT * FROM shopping_list_items WHERE deleted_at IS NULL ORDER BY created_at"
+    ).fetchall()
     return [dict(row) for row in rows]
 
 
 def get_shopping_list_item(conn, item_id):
+    """Fetch one shopping-list row by id regardless of soft-delete state --
+    see the identical note on get_item above."""
     row = conn.execute(
         "SELECT * FROM shopping_list_items WHERE id = ?", (item_id,)
     ).fetchone()
@@ -276,8 +324,21 @@ def get_shopping_list_item(conn, item_id):
 
 
 def delete_shopping_list_item(conn, item_id):
+    """Soft-delete: mark the row deleted_at rather than removing it, so a
+    subsequent restore_shopping_list_item can undo this exact delete."""
     with conn:
-        conn.execute("DELETE FROM shopping_list_items WHERE id = ?", (item_id,))
+        conn.execute(
+            "UPDATE shopping_list_items SET deleted_at = ? WHERE id = ?", (_now(), item_id)
+        )
+
+
+def restore_shopping_list_item(conn, item_id):
+    """Undo a soft-delete by clearing deleted_at back to NULL. Idempotent for
+    the same reason as restore_item -- see its docstring."""
+    with conn:
+        conn.execute(
+            "UPDATE shopping_list_items SET deleted_at = NULL WHERE id = ?", (item_id,)
+        )
 
 
 _STAGING_FIELDS = (
