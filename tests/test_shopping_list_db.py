@@ -48,6 +48,19 @@ def test_get_shopping_list_item_returns_the_item(conn):
     assert item["name"] == "Rice"
 
 
+def test_get_shopping_list_item_returns_none_for_a_soft_deleted_row(conn):
+    """Regression test for the resolve-on-a-deleted-item bug: this lookup
+    must stay deleted-aware, since a caller (shopping_list_resolve) uses it
+    to decide whether a mutation should proceed at all, not only to read
+    display data."""
+    import db
+
+    item_id = db.add_shopping_list_item(conn, name="Rice", storage="pantry")
+    db.delete_shopping_list_item(conn, item_id)
+
+    assert db.get_shopping_list_item(conn, item_id) is None
+
+
 def test_delete_shopping_list_item_removes_it(conn):
     import db
 

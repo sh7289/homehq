@@ -154,3 +154,27 @@ def test_shopping_list_page_shows_suggested_match(client):
 
     assert response.status_code == 200
     assert b"Cumin" in response.data
+
+
+def test_resolve_on_a_deleted_item_404s_instead_of_reviving_it(client):
+    """Regression test: a soft-deleted shopping-list row must not be usable
+    by /resolve. Before soft-delete, a deleted row simply didn't exist, so
+    get_shopping_list_item returning None (-> 404) here was automatic; the
+    lookup must stay deleted-aware now that the row still exists with
+    deleted_at set, or a resolve on an already-removed item would silently
+    succeed and re-add it to inventory."""
+    _login(client)
+    client.post("/shopping-list/add", data={"name": "Rice", "storage": "pantry"})
+    item_id = _shopping_list()[0]["id"]
+    client.post(f"/shopping-list/{item_id}/delete")
+    assert _shopping_list() == []
+
+    response = client.post(
+        f"/shopping-list/{item_id}/resolve",
+        data={"action": "new", "quantity": "1"},
+    )
+
+    assert response.status_code == 404
+    # And critically: no inventory item was created from the deleted row.
+    assert _db_items() == []
+    assert _shopping_list() == []

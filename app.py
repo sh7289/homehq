@@ -508,7 +508,8 @@ def create_app():
         conn = get_db()
         # Fetched before the soft-delete purely to carry the item's name
         # through to the Undo banner on the next render -- the row itself
-        # isn't touched by this lookup.
+        # isn't touched by this lookup. Order matters: get_item only sees
+        # live rows, so this must run before delete_item marks it deleted.
         item = db.get_item(conn, item_id)
         db.delete_item(conn, item_id)
         return _redirect_to_storage_page(
@@ -643,7 +644,9 @@ def create_app():
     def shopping_list_delete(item_id):
         conn = get_db()
         # Fetched before the soft-delete purely to carry the item's name
-        # through to the Undo banner on the next render.
+        # through to the Undo banner on the next render. Order matters:
+        # get_shopping_list_item only sees live rows, so this must run
+        # before delete_shopping_list_item marks it deleted.
         item = db.get_shopping_list_item(conn, item_id)
         db.delete_shopping_list_item(conn, item_id)
         return redirect(
@@ -667,6 +670,10 @@ def create_app():
     @app.route("/shopping-list/<int:item_id>/resolve", methods=["POST"])
     @login_required
     def shopping_list_resolve(item_id):
+        # get_shopping_list_item excludes a soft-deleted row (returns None
+        # for one), so this 404s for an item that's already been removed --
+        # otherwise a resolve on an already-deleted row would silently
+        # succeed and re-add it to inventory.
         list_item = db.get_shopping_list_item(get_db(), item_id)
         if list_item is None:
             abort(404)

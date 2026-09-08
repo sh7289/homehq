@@ -218,14 +218,18 @@ def list_items(conn, storage=None):
 
 
 def get_item(conn, item_id):
-    """Fetch one pantry row by id regardless of soft-delete state.
-
-    Unlike list_items, this deliberately does not filter on deleted_at: it
-    backs the delete route's "what was this called?" lookup (needed to show
-    the Undo affordance right after a soft-delete, when the row is no longer
-    live) as well as the restore route.
+    """Fetch one *live* pantry row by id -- like list_items, this excludes a
+    soft-deleted row (returns None for one), which matters because callers
+    use it to decide whether to go ahead with a mutation (e.g. a future
+    caller checking a row is still live before acting on it), not only to
+    read display data. The inventory_delete route calls this before the
+    row becomes soft-deleted, so it still sees it; nothing needs to see a
+    soft-deleted row through this function -- the restore routes restore by
+    id directly, with no lookup first.
     """
-    row = conn.execute("SELECT * FROM pantry_items WHERE id = ?", (item_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM pantry_items WHERE id = ? AND deleted_at IS NULL", (item_id,)
+    ).fetchone()
     return dict(row) if row else None
 
 
@@ -315,10 +319,19 @@ def list_shopping_list_items(conn):
 
 
 def get_shopping_list_item(conn, item_id):
-    """Fetch one shopping-list row by id regardless of soft-delete state --
-    see the identical note on get_item above."""
+    """Fetch one *live* shopping-list row by id -- excludes a soft-deleted
+    row (returns None for one), same as get_item above.
+
+    This matters beyond display: shopping_list_resolve uses this lookup to
+    decide whether to go ahead with the checkoff/purchase mutation at all.
+    Before soft-delete existed, a deleted row simply didn't exist, so this
+    returning None (-> 404) for it was automatic; now that a deleted row
+    still exists with deleted_at set, this filter is what keeps a resolve
+    request against an already-removed list item from silently succeeding
+    and re-adding it to inventory.
+    """
     row = conn.execute(
-        "SELECT * FROM shopping_list_items WHERE id = ?", (item_id,)
+        "SELECT * FROM shopping_list_items WHERE id = ? AND deleted_at IS NULL", (item_id,)
     ).fetchone()
     return dict(row) if row else None
 

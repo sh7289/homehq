@@ -178,6 +178,35 @@ def test_list_items_excludes_soft_deleted_rows_by_storage_too(conn):
     assert db.list_items(conn) == []
 
 
+def test_get_item_returns_the_item(conn):
+    import db
+
+    item_id = db.add_item(conn, name="Rice", quantity=2, unit="bags", location="")
+
+    item = db.get_item(conn, item_id)
+
+    assert item["name"] == "Rice"
+
+
+def test_get_item_returns_none_when_missing(conn):
+    import db
+
+    assert db.get_item(conn, 999) is None
+
+
+def test_get_item_returns_none_for_a_soft_deleted_row(conn):
+    """Regression test companion to the shopping-list equivalent: get_item
+    is used to decide whether to act on a row, not only to read display
+    data, so it must stay deleted-aware rather than surfacing a
+    soft-deleted row as if it were still live."""
+    import db
+
+    item_id = db.add_item(conn, name="Rice", quantity=2, unit="bags", location="")
+    db.delete_item(conn, item_id)
+
+    assert db.get_item(conn, item_id) is None
+
+
 def test_updated_at_is_utc_iso8601_and_current(conn):
     import db
 
