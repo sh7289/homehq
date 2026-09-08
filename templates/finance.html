@@ -4,44 +4,49 @@
 {% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/finance.css') }}">{% endblock %}
 {% block content %}
 <main class="finance">
-  <header class="finance-heading">
-    <div><p class="finance-eyebrow">Household ledger / private</p><h1>Finance</h1><p class="finance-intro">A quiet place to check your connected accounts.</p></div>
-    <span class="finance-badge">Read-only balances</span>
+  <header class="finance-heading"><div><p class="finance-eyebrow">Household ledger / private</p><h1>Where our money is</h1><p class="finance-intro">Your accounts, organized for a clearer picture.</p></div>
+    {% if data and not unavailable and not upgrade %}<form method="post" action="{{ url_for('finance_save_snapshot') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn--primary" type="submit">Save snapshot</button></form>{% endif %}
   </header>
-  {% if demo %}<p class="finance-notice" role="status">Demo preview — these are fictional accounts and balances.</p>{% endif %}
-  {% if unavailable %}
-    <section class="finance-empty"><h2>Balances temporarily unavailable</h2><p>The local finance store could not be read. Check the server configuration and scheduled sync, then return here.</p></section>
-  {% elif not data or not data.last_attempt %}
-    <section class="finance-empty"><span class="finance-eyebrow">Getting connected</span><h2>First sync needed</h2><p>Your private finance page is ready. Complete the server setup and run the first account sync to see balances here.</p><p>Account connections are managed directly with SimpleFIN Bridge.</p></section>
+  {% if error %}<p class="finance-notice" role="alert">{{ error }}</p>{% endif %}
+  {% if demo %}<p class="finance-notice">Demo preview — fictional balances.</p>{% endif %}
+  {% if unavailable %}<section class="finance-empty"><h2>Balances temporarily unavailable</h2><p>The local finance store could not be read. Check the server configuration and sync.</p></section>
+  {% elif upgrade %}<section class="finance-empty"><h2>Finance update needed</h2><p>Your existing balances are preserved. Ask your household administrator to run the finance database upgrade before using the worksheet.</p></section>
+  {% elif not data %}<section class="finance-empty"><h2>First sync needed</h2><p>Complete the server setup and run your first sync to start your household worksheet.</p></section>
   {% else %}
-    <section class="finance-status" aria-label="Refresh status">
-      <div><span class="finance-label">Last complete sync</span><strong>{{ data.last_success or 'No complete sync yet' }}</strong></div>
-      <div><span class="finance-label">Latest attempt · {{ data.last_attempt.status }}</span><time>{{ data.last_attempt.at }}</time></div>
+    <div class="ledger-meta"><span>Last complete sync: {% if data.last_success %}<time title="{{ data.last_success }}">{{ data.last_success|finance_age }}</time>{% else %}Not yet{% endif %}</span><span>Bank connections are read-only</span></div>
+    <section class="ledger-summary" aria-label="Household totals">
+      {% for bucket in ['liquid', 'illiquid', 'debt'] %}<article><span class="finance-label">{{ buckets[bucket] }}</span>{% for currency, amount in data.summary.get(bucket, {}).items() %}<div><strong>{{ amount|finance_amount }}</strong><span>{{ currency }}</span></div>{% else %}<strong class="ledger-unset">—</strong><span>No confirmed balances</span>{% endfor %}</article>{% endfor %}
     </section>
-    {% if not data.totals.complete %}<p class="finance-notice" role="status">Some balances may be unavailable. Totals include only accounts present in the latest available account data. Check your connections in SimpleFIN Bridge.</p>{% endif %}
-    {% if data.accounts|selectattr('stale')|list %}<p class="finance-notice">Stale balances: one or more institutions have not provided a balance in over 48 hours.</p>{% endif %}
-    <section aria-labelledby="totals-title"><h2 id="totals-title">Connected-account totals</h2><p class="finance-help">Provider signs are preserved. Each currency stands alone. This is not your complete household net worth.</p>
-      <div class="finance-totals">{% for currency, amount in data.totals.by_currency.items() %}<article class="finance-total"><span class="finance-label">{{ currency }} · {{ 'Complete response' if data.totals.complete else 'Incomplete response' }}</span><strong>{{ amount|finance_amount }}</strong></article>{% else %}<p>No monetary balances available.</p>{% endfor %}</div>
+    <p class="finance-help">Totals cover included accounts only, with currencies kept separate. They are not a complete household net worth. Debt totals require confirmation of the provider’s balance sign.</p>
+    <section class="ledger-coverage" aria-label="Snapshot coverage"><strong>{{ 'Ready to capture' if data.complete else 'Check coverage before capturing' }}</strong>
+      {% for key, label in [('unassigned','need grouping'),('missing','missing'),('stale','stale'),('excluded','excluded'),('unconfirmed_debt','debt signs to confirm')] %}{% if data.coverage[key] %}<span>{{ data.coverage[key] }} {{ label }}</span>{% endif %}{% endfor %}
+      {% if data.last_attempt and data.last_attempt.status != 'success' %}<span>Latest sync: {{ data.last_attempt.status }}</span>{% endif %}
+      {% if not data.complete %}<p>You can save an incomplete snapshot. It will retain these flags and each account’s original balance date.</p>{% endif %}
     </section>
-    <section class="finance-section" aria-labelledby="accounts-title"><div class="finance-section-heading"><h2 id="accounts-title">Your accounts</h2><span>{{ data.accounts|length }} connected</span></div>
-      <div class="finance-accounts">{% for account in data.accounts %}<article class="finance-account">
-        <div><h3>{{ account.label }}</h3><p>Balance as of <time>{{ account.balance_at }}</time></p>{% if account.missing %}<span class="finance-flag">Missing from latest response · excluded from total</span>{% elif account.stale %}<span class="finance-flag">Stale</span>{% endif %}{% if account.nonfinancial %}<span class="finance-flag">Nonfinancial unit · excluded from total</span>{% endif %}</div>
-        <div class="finance-account-amount"><strong>{{ account.balance if account.nonfinancial else account.balance|finance_amount }}</strong><span>{{ 'Custom unit' if account.nonfinancial else account.currency }}</span></div>
-      </article>{% else %}<p>No accounts returned. Review account selection in SimpleFIN Bridge.</p>{% endfor %}</div>
+    {% with frozen=false %}{% include 'finance_payments.html' %}{% include 'finance_rows.html' %}{% endwith %}
+    <section class="ledger-tools" aria-label="Organize accounts">
+      <details {% if request.endpoint == 'finance_manual' %}open{% endif %}><summary>Add a manual balance</summary>
+        <p class="finance-help">For cash, gift cards, property, or accounts outside SimpleFIN. Update these balances yourself.</p>
+        <form method="post" action="{{ url_for('finance_manual') }}" class="ledger-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>Account name<input name="nickname" maxlength="80" required value="{{ request.form.get('nickname', '') }}" placeholder="Cash &amp; gift cards"></label>
+          <label>Owner<input name="owner" maxlength="80" value="{{ request.form.get('owner', '') }}" placeholder="Joint"></label>
+          <label>Section<select name="group_id">{% for group in data.groups %}<option value="{{ group.id }}" {{ 'selected' if request.form.get('group_id') == group.id|string else '' }}>{{ group.name }}</option>{% endfor %}</select></label>
+          <label>Currency<input name="currency" maxlength="3" minlength="3" required value="{{ request.form.get('currency', 'USD') }}"></label>
+          <label>Balance<input name="balance" type="text" inputmode="decimal" required value="{{ request.form.get('balance', '') }}" placeholder="0.00"></label>
+          <label>Balance date<input name="balance_at" type="date" max="{{ today }}" required value="{{ request.form.get('balance_at', today) }}"></label>
+          <button class="btn btn--primary" type="submit">Add balance</button>
+        </form>
+      </details>
+      <details {% if request.endpoint == 'finance_group' %}open{% endif %}><summary>Manage sections &amp; order</summary><p class="finance-help">Choose what counts as liquid or illiquid. Lower order numbers appear first. Rename existing sections or add your own.</p>
+        {% for group in data.groups %}<form class="ledger-group-form" method="post" action="{{ url_for('finance_group') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="group_id" value="{{ group.id }}">
+          <label>Section name<input name="name" value="{{ group.name }}" maxlength="80" required></label><label>Bucket{% if group.id == 6 %}<input type="hidden" name="bucket" value="unassigned"><span>Needs grouping (new-account inbox)</span>{% else %}<select name="bucket">{% for key, label in buckets.items() %}<option value="{{ key }}" {{ 'selected' if group.bucket == key else '' }}>{{ label }}</option>{% endfor %}</select>{% endif %}</label><label>Order<input name="position" type="number" min="0" max="9999" value="{{ group.position }}" required></label><button class="btn" type="submit">Save section</button></form>{% endfor %}
+        <form class="ledger-group-form" method="post" action="{{ url_for('finance_group') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>New section<input name="name" maxlength="80" required></label><label>Bucket<select name="bucket">{% for key, label in buckets.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label><label>Order<input name="position" type="number" min="0" max="9999" value="100" required></label><button class="btn" type="submit">Add section</button></form>
+      </details>
     </section>
-    <section class="finance-section" aria-labelledby="history-title"><h2 id="history-title">Daily observations</h2><p class="finance-help">Saved at sync time (UTC). Account changes affect totals. Incomplete days are excluded from the chart.</p>
-      {% set complete_days = data.history|selectattr('complete')|list %}
-      {% if complete_days|length < 2 %}<p class="finance-history-empty">Your history starts here. A chart appears after two complete daily observations.</p>{% else %}
-        {% for currency in data.totals.by_currency %}
-          {% set points = namespace(values=[]) %}{% for day in complete_days %}{% if currency in day.by_currency %}{% set points.values = points.values + [day.by_currency[currency]] %}{% endif %}{% endfor %}
-          {% if points.values|length > 1 %}{% set lo = points.values|min %}{% set hi = points.values|max %}{% set span = hi-lo if hi != lo else 1 %}
-          <figure class="finance-chart"><figcaption>{{ currency }} · complete daily totals</figcaption><svg viewBox="0 0 600 130" role="img" aria-label="{{ currency }} daily observations, with exact values in the table below"><line x1="15" y1="110" x2="585" y2="110" stroke="currentColor" opacity=".2"/>{% for day in data.history %}{% if day.complete and currency in day.by_currency %}<circle cx="{{ day.chart_x }}" cy="{{ 105 - ((day.by_currency[currency]-lo)/span)*85 }}" r="4" fill="currentColor"><title>{{ day.date }}: {{ currency }} {{ day.by_currency[currency] }}</title></circle>{% endif %}{% endfor %}</svg><div class="finance-chart-dates"><span>{{ data.history[0].date }}</span><span>{{ data.history[-1].date }}</span></div></figure>
-          {% endif %}
-        {% endfor %}
-      {% endif %}
-      {% if data.history %}<details class="finance-history"><summary>View daily values</summary><div class="finance-table-wrap"><table><caption>Daily connected-account totals, by currency</caption><thead><tr><th scope="col">Date (UTC)</th><th scope="col">Currency</th><th scope="col">Balance</th><th scope="col">Response</th></tr></thead><tbody>{% for day in data.history|reverse %}{% for currency, amount in day.by_currency.items() %}<tr><td>{{ day.date }}</td><td>{{ currency }}</td><td>{{ amount|finance_amount }}</td><td>{{ 'Complete' if day.complete else 'Incomplete' }}</td></tr>{% else %}<tr><td>{{ day.date }}</td><td colspan="2">No monetary balances</td><td>{{ 'Complete' if day.complete else 'Incomplete' }}</td></tr>{% endfor %}{% endfor %}</tbody></table></div></details>{% endif %}
+    <section class="ledger-section"><header class="ledger-section-title"><h2>Saved snapshots</h2><span>Frozen household views</span></header>
+      {% if snapshots %}<ul class="ledger-snapshots">{% for saved in snapshots %}<li><a href="{{ url_for('finance_snapshot', snapshot_id=saved.id) }}">{{ saved.captured_at[:10] }} · {{ saved.captured_at[11:19] }} UTC</a><span>{{ saved.actor }} · {{ 'Complete coverage' if saved.complete else 'Incomplete' }}</span></li>{% endfor %}</ul>{% else %}<p class="ledger-empty-group">Save your first snapshot when you’re ready. You’ll be able to compare it with the next one.</p>{% endif %}
     </section>
+    <details class="ledger-daily"><summary>Daily bank sync history</summary><p class="finance-help">Automatic connected-account totals. These do not include your manual entries or household groupings.</p>{% include 'finance_daily.html' %}</details>
   {% endif %}
-  <footer class="finance-footer">Balances refresh on the server’s daily schedule. Manage account access and reconnect institutions in SimpleFIN Bridge.</footer>
 </main>
 {% endblock %}
