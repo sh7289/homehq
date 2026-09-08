@@ -603,13 +603,23 @@ def create_app():
     @app.route("/shopping-list")
     @login_required
     def shopping_list():
-        list_items = db.list_shopping_list_items(get_db())
+        conn = get_db()
+        list_items = db.list_shopping_list_items(conn)
+        active_items = [item for item in list_items if not item["purchased"]]
+        purchased_items = [item for item in list_items if item["purchased"]]
+        # Fresh/untracked items have no inventory decision to make, so they
+        # never need a suggested match -- only shelf-stable/frozen purchased
+        # items go through the same matching flow the old inline check-off
+        # panel used, just moved here to happen at Finish-shopping time.
+        review_items = [item for item in purchased_items if item["storage"] != "fresh"]
+        fresh_purchased_items = [
+            item for item in purchased_items if item["storage"] == "fresh"
+        ]
         suggestions = {}
-        for list_item in list_items:
-            candidates = db.list_items(get_db(), storage=list_item["storage"])
-            suggestions[list_item["id"]] = matching.find_best_match(
-                list_item["name"], candidates
-            )
+        for item in review_items:
+            candidates = db.list_items(conn, storage=item["storage"])
+            suggestions[item["id"]] = matching.find_best_match(item["name"], candidates)
+
         # Undo affordance (see shopping_list_delete): same one-shot query-param
         # pattern as the inventory pages -- no separate time-based expiry,
         # the banner is only ever rendered on this one page render.
@@ -620,7 +630,12 @@ def create_app():
             undo_id = None
         return render_template(
             "shopping_list.html",
-            list_items=list_items,
+            active_items=active_items,
+            purchased_items=purchased_items,
+            review_items=review_items,
+            fresh_purchased_items=fresh_purchased_items,
+            purchased_count=len(purchased_items),
+            total_count=len(list_items),
             suggestions=suggestions,
             undo_id=undo_id,
             undo_name=request.args.get("undo_name"),
@@ -631,12 +646,30 @@ def create_app():
     @login_required
     def shopping_list_add():
         quantity_to_buy = request.form.get("quantity_to_buy", "").strip()
+        amount_note = request.form.get("amount_note", "").strip()
         db.add_shopping_list_item(
             get_db(),
             name=request.form["name"].strip(),
             storage=request.form.get("storage", "pantry"),
             quantity_to_buy=float(quantity_to_buy) if quantity_to_buy else None,
+            amount_note=amount_note or None,
         )
+        return redirect(url_for("shopping_list"))
+
+    @app.route("/shopping-list/<int:item_id>/toggle-purchased", methods=["POST"])
+    @login_required
+    def shopping_list_toggle_purchased(item_id):
+        """Flip the persisted purchased checkbox. Deliberately does nothing
+        else: no inventory read or write happens here, in either direction
+        -- see db.set_shopping_list_item_purchased. Reversible any number of
+        times as long as the item hasn't been reconciled by Finish shopping
+        yet (once reconciled, the row is soft-deleted and this 404s, same as
+        every other action against a gone item)."""
+        conn = get_db()
+        item = db.get_shopping_list_item(conn, item_id)
+        if item is None:
+            abort(404)
+        db.set_shopping_list_item_purchased(conn, item_id, purchased=not item["purchased"])
         return redirect(url_for("shopping_list"))
 
     @app.route("/shopping-list/<int:item_id>/delete", methods=["POST"])
@@ -667,33 +700,63 @@ def create_app():
         db.restore_shopping_list_item(get_db(), item_id)
         return redirect(url_for("shopping_list"))
 
-    @app.route("/shopping-list/<int:item_id>/resolve", methods=["POST"])
+    @app.route("/shopping-list/finish", methods=["POST"])
     @login_required
-    def shopping_list_resolve(item_id):
-        # get_shopping_list_item excludes a soft-deleted row (returns None
-        # for one), so this 404s for an item that's already been removed --
-        # otherwise a resolve on an already-deleted row would silently
-        # succeed and re-add it to inventory.
-        list_item = db.get_shopping_list_item(get_db(), item_id)
-        if list_item is None:
-            abort(404)
-        quantity = float(request.form.get("quantity") or 0)
-        action = request.form.get("action")
+    def shopping_list_finish():
+        """Reconcile every currently-purchased item: shelf-stable/frozen
+        items get the match-or-new-item treatment (same matching.find_best_match
+        flow as the old inline check-off panel, just happening here instead,
+        using whichever choice the Purchased section's review form
+        submitted for each item), while fresh/untracked items just complete
+        with no inventory write at all -- there's no decision to make for
+        them.
 
-        if action == "match":
-            matched_item_id = int(request.form["matched_item_id"])
-            db.adjust_quantity(get_db(), matched_item_id, delta=quantity)
-        else:
-            db.add_item(
-                get_db(),
-                name=list_item["name"],
-                quantity=quantity,
-                unit="",
-                location="",
-                storage=list_item["storage"],
-            )
+        Idempotency (the core correctness requirement for this task):
+        db.claim_shopping_list_item_for_finish atomically flips each item's
+        reconciled_at from NULL to a timestamp, and only the call that wins
+        that flip goes on to touch inventory. A duplicate submission of the
+        same purchased set -- a double click, a retried POST -- finds every
+        item already claimed (or already soft-deleted from the prior run)
+        and no-ops for all of them, so inventory is never double-applied.
 
-        db.delete_shopping_list_item(get_db(), item_id)
+        Every suggested match still requires the user's own choice from the
+        review form rendered on GET /shopping-list -- nothing here computes
+        or applies a match on its own; it only carries out whichever action
+        the user already selected.
+        """
+        conn = get_db()
+        for item in db.list_shopping_list_items(conn):
+            if not item["purchased"]:
+                continue
+            if not db.claim_shopping_list_item_for_finish(conn, item["id"]):
+                # Already reconciled by an earlier Finish-shopping call --
+                # no-op, do not touch inventory again.
+                continue
+
+            if item["storage"] != "fresh":
+                action = request.form.get(f"action-{item['id']}", "new")
+                quantity = float(
+                    request.form.get(f"quantity-{item['id']}")
+                    or item["quantity_to_buy"]
+                    or 0
+                )
+                if action == "match":
+                    matched_item_id = request.form.get(f"matched_item_id-{item['id']}")
+                    if matched_item_id:
+                        db.adjust_quantity(conn, int(matched_item_id), delta=quantity)
+                else:
+                    db.add_item(
+                        conn,
+                        name=item["name"],
+                        quantity=quantity,
+                        unit="",
+                        location="",
+                        storage=item["storage"],
+                    )
+            # Fresh/untracked items fall straight through to here with no
+            # inventory write -- "completing" one is just removing it.
+            db.delete_shopping_list_item(conn, item["id"])
+
         return redirect(url_for("shopping_list"))
 
     @app.route("/import")

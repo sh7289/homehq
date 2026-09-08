@@ -1422,6 +1422,20 @@ details[open] > .disclosure__summary::after {
   border-color: var(--teal);
 }
 
+/* Shopping list: a large, persisted "purchased" checkbox -- submits its
+   one-field form on change (see base.html has no JS for this; the
+   onchange="this.form.submit()" inline handler is the entire progressive
+   enhancement here, same spirit as the plain POST buttons everywhere else
+   on this row). Checking/unchecking never does more than flip the stored
+   flag server-side. */
+.purchase-check {
+  width: 1.4rem;
+  height: 1.4rem;
+  flex: 0 0 auto;
+  accent-color: var(--teal);
+  cursor: pointer;
+}
+
 /* Name/quantity/expiry stacked as one column, so every row lines up the
    same way regardless of how long its name or meta text is -- actions sit
    in a second column pushed to the far right by .row__actions's

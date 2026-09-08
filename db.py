@@ -59,6 +59,34 @@ def init_db(conn):
     if "deleted_at" not in shopping_list_columns:
         # Same soft-delete marker as pantry_items -- see the comment there.
         conn.execute("ALTER TABLE shopping_list_items ADD COLUMN deleted_at TEXT")
+    if "purchased" not in shopping_list_columns:
+        # Persisted checkbox state. Checking/unchecking only ever flips this
+        # flag (see set_shopping_list_item_purchased) -- it is deliberately
+        # separate from reconciled_at below, so "I bought this" and "this is
+        # reflected in inventory" are two different, independently-toggle-
+        # able/idempotent facts about the row.
+        conn.execute(
+            "ALTER TABLE shopping_list_items ADD COLUMN purchased INTEGER NOT NULL DEFAULT 0"
+        )
+    if "reconciled_at" not in shopping_list_columns:
+        # Idempotency guard for Finish shopping: NULL means "not yet
+        # reconciled into inventory (or completed, for a fresh/untracked
+        # item)". claim_shopping_list_item_for_finish flips this from NULL
+        # to a timestamp with a single atomic UPDATE ... WHERE reconciled_at
+        # IS NULL, so a repeat Finish-shopping submission for the same item
+        # can never apply its inventory write twice.
+        conn.execute("ALTER TABLE shopping_list_items ADD COLUMN reconciled_at TEXT")
+    if "amount_note" not in shopping_list_columns:
+        # Optional textual amount ("a bag", "a couple") alongside the
+        # existing numeric quantity_to_buy, for groceries with no clean
+        # number.
+        conn.execute("ALTER TABLE shopping_list_items ADD COLUMN amount_note TEXT")
+    if "source_recipe" not in shopping_list_columns:
+        # Nullable label of the recipe this item came from, when known.
+        # Nothing populates this yet (a later task wires up recipe ->
+        # shopping); this task only needs the column to exist and render
+        # correctly, including showing nothing when it's null.
+        conn.execute("ALTER TABLE shopping_list_items ADD COLUMN source_recipe TEXT")
 
     conn.execute(
         """
@@ -301,12 +329,20 @@ def restore_item(conn, item_id):
         conn.execute("UPDATE pantry_items SET deleted_at = NULL WHERE id = ?", (item_id,))
 
 
-def add_shopping_list_item(conn, name, storage="pantry", quantity_to_buy=None):
+def add_shopping_list_item(
+    conn,
+    name,
+    storage="pantry",
+    quantity_to_buy=None,
+    amount_note=None,
+    source_recipe=None,
+):
     with conn:
         cursor = conn.execute(
-            "INSERT INTO shopping_list_items (name, storage, quantity_to_buy, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (name, storage, quantity_to_buy, _now()),
+            "INSERT INTO shopping_list_items "
+            "(name, storage, quantity_to_buy, amount_note, source_recipe, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (name, storage, quantity_to_buy, amount_note, source_recipe, _now()),
         )
         return cursor.lastrowid
 
@@ -352,6 +388,47 @@ def restore_shopping_list_item(conn, item_id):
         conn.execute(
             "UPDATE shopping_list_items SET deleted_at = NULL WHERE id = ?", (item_id,)
         )
+
+
+def set_shopping_list_item_purchased(conn, item_id, purchased):
+    """Flip the persisted "purchased" checkbox only.
+
+    This never touches pantry_items/freezer inventory and never sets
+    reconciled_at -- checking or unchecking the box is purely a note to
+    self ("I bought this") and must be freely reversible any number of
+    times before Finish shopping ever runs. See
+    claim_shopping_list_item_for_finish for the separate, one-way action
+    that actually reconciles into inventory.
+    """
+    with conn:
+        conn.execute(
+            "UPDATE shopping_list_items SET purchased = ? WHERE id = ?",
+            (1 if purchased else 0, item_id),
+        )
+
+
+def claim_shopping_list_item_for_finish(conn, item_id):
+    """Atomically claim a purchased shopping-list item for Finish-shopping
+    reconciliation.
+
+    Returns True for exactly one caller per item -- the UPDATE only matches
+    (and only then flips reconciled_at from NULL to a timestamp) when the
+    item is still purchased, still live, and not already reconciled. Every
+    other call for that same item -- a genuine duplicate Finish-shopping
+    submission, a retried POST, two requests racing -- matches zero rows,
+    returns False, and must no-op rather than repeat the item's inventory
+    write. This is the idempotency mechanism the task calls for: whatever
+    inventory work Finish shopping does for an item happens at most once,
+    no matter how many times Finish shopping is called for the same
+    purchased set.
+    """
+    with conn:
+        cursor = conn.execute(
+            "UPDATE shopping_list_items SET reconciled_at = ? "
+            "WHERE id = ? AND purchased = 1 AND reconciled_at IS NULL AND deleted_at IS NULL",
+            (_now(), item_id),
+        )
+        return cursor.rowcount > 0
 
 
 _STAGING_FIELDS = (

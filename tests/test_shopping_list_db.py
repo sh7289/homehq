@@ -132,3 +132,96 @@ def test_unrelated_shopping_list_item_survives_delete_and_undo(conn):
     items = {item["id"]: item for item in db.list_shopping_list_items(conn)}
     assert items[keep_id]["name"] == "Beans"
     assert items[gone_id]["name"] == "Rice"
+
+
+def test_new_shopping_list_item_defaults_to_unpurchased_and_unreconciled(conn):
+    import db
+
+    item_id = db.add_shopping_list_item(conn, name="Rice", storage="pantry")
+
+    item = db.get_shopping_list_item(conn, item_id)
+    assert item["purchased"] == 0
+    assert item["reconciled_at"] is None
+    assert item["amount_note"] is None
+    assert item["source_recipe"] is None
+
+
+def test_add_shopping_list_item_stores_amount_note_and_source_recipe(conn):
+    import db
+
+    item_id = db.add_shopping_list_item(
+        conn,
+        name="Basil",
+        storage="fresh",
+        amount_note="a couple sprigs",
+        source_recipe="Weeknight Pasta",
+    )
+
+    item = db.get_shopping_list_item(conn, item_id)
+    assert item["amount_note"] == "a couple sprigs"
+    assert item["source_recipe"] == "Weeknight Pasta"
+
+
+def test_set_shopping_list_item_purchased_flips_the_flag(conn):
+    import db
+
+    item_id = db.add_shopping_list_item(conn, name="Rice", storage="pantry")
+
+    db.set_shopping_list_item_purchased(conn, item_id, purchased=True)
+    assert db.get_shopping_list_item(conn, item_id)["purchased"] == 1
+
+    db.set_shopping_list_item_purchased(conn, item_id, purchased=False)
+    assert db.get_shopping_list_item(conn, item_id)["purchased"] == 0
+
+
+def test_set_shopping_list_item_purchased_never_sets_reconciled_at(conn):
+    import db
+
+    item_id = db.add_shopping_list_item(conn, name="Rice", storage="pantry")
+
+    db.set_shopping_list_item_purchased(conn, item_id, purchased=True)
+    db.set_shopping_list_item_purchased(conn, item_id, purchased=False)
+    db.set_shopping_list_item_purchased(conn, item_id, purchased=True)
+
+    assert db.get_shopping_list_item(conn, item_id)["reconciled_at"] is None
+
+
+def test_claim_shopping_list_item_for_finish_requires_purchased(conn):
+    import db
+
+    item_id = db.add_shopping_list_item(conn, name="Rice", storage="pantry")
+
+    assert db.claim_shopping_list_item_for_finish(conn, item_id) is False
+    assert db.get_shopping_list_item(conn, item_id)["reconciled_at"] is None
+
+
+def test_claim_shopping_list_item_for_finish_succeeds_once_for_a_purchased_item(conn):
+    import db
+
+    item_id = db.add_shopping_list_item(conn, name="Rice", storage="pantry")
+    db.set_shopping_list_item_purchased(conn, item_id, purchased=True)
+
+    claimed = db.claim_shopping_list_item_for_finish(conn, item_id)
+
+    assert claimed is True
+    assert db.get_shopping_list_item(conn, item_id)["reconciled_at"] is not None
+
+
+def test_claim_shopping_list_item_for_finish_is_idempotent(conn):
+    """The core idempotency guard: a second claim on the same item must
+    fail (return False) and must not move reconciled_at again -- this is
+    what stops a repeat Finish-shopping call from re-applying an inventory
+    write."""
+    import db
+
+    item_id = db.add_shopping_list_item(conn, name="Rice", storage="pantry")
+    db.set_shopping_list_item_purchased(conn, item_id, purchased=True)
+
+    first = db.claim_shopping_list_item_for_finish(conn, item_id)
+    reconciled_at_after_first = db.get_shopping_list_item(conn, item_id)["reconciled_at"]
+    second = db.claim_shopping_list_item_for_finish(conn, item_id)
+    reconciled_at_after_second = db.get_shopping_list_item(conn, item_id)["reconciled_at"]
+
+    assert first is True
+    assert second is False
+    assert reconciled_at_after_first == reconciled_at_after_second
