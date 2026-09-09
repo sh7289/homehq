@@ -1,11 +1,9 @@
 {% extends "base.html" %}
+{% from "_ingredient_editor.html" import ingredient_editor %}
 {% block title %}Ingredients – {{ recipe.name }}{% endblock %}
 {% block content %}
   <div class="card">
-    <div class="top-actions">
-      <h1 class="card__title">{{ recipe.name }}</h1>
-      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
-    </div>
+    <h1 class="card__title">{{ recipe.name }}</h1>
     <hr class="card__rule">
     <p class="card__meta">Ingredients</p>
 
@@ -21,12 +19,7 @@
     {% endif %}
 
     <form method="post" action="{{ url_for('recipe_ingredients', slug=recipe.slug) }}">
-      <div class="field">
-        <label for="ingredients">One ingredient per line</label>
-        <textarea id="ingredients" name="ingredients" rows="12"
-                  placeholder="ground beef | 1 | lb | fresh&#10;cumin | 2 | tsp | staple&#10;kidney beans | 1 | can">{{ lines }}</textarea>
-        <span class="field__help">{{ ingredient_help }}</span>
-      </div>
+      {{ ingredient_editor(ingredients, lines, ingredient_help) }}
       <button class="btn btn--primary" type="submit">Save ingredients</button>
     </form>
 
@@ -47,4 +40,6 @@
 
     <a class="btn btn--ghost" href="{{ url_for('recipe_detail', slug=recipe.slug) }}">Back to recipe</a>
   </div>
+
+  <script src="{{ url_for('static', filename='js/recipe-editor.js') }}"></script>
 {% endblock %}

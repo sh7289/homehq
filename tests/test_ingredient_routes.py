@@ -52,6 +52,20 @@ def test_ingredients_page_prefills_the_existing_list(client, app):
     assert "onion | 1 | count | fresh" in body
 
 
+def test_advanced_textarea_warns_without_js(client, app):
+    """Finding 3c: with JS disabled, recipe-editor.js never flips
+    #ingredients-source to "advanced", so anything typed into the raw-text
+    box is silently discarded on save. A <noscript> warning must be
+    present inside the Advanced disclosure so that's not silent."""
+    _write_recipe(app, "classic-beef-chili.md", CHILI)
+    _login(client)
+
+    body = client.get("/recipes/classic-beef-chili/ingredients").data.decode()
+
+    assert "<noscript>" in body
+    assert "needs JavaScript to save" in body
+
+
 def test_suggest_proposes_ingredients_without_writing_the_file(client, app, monkeypatch):
     _write_recipe(app, "classic-beef-chili.md", CHILI)
     monkeypatch.setattr(

@@ -34,8 +34,9 @@ import db
 import export_csv
 import expiry
 import matching
-import mfa_security
 import finance_routes
+import mfa_security
+import pantry_check
 import recipe_loader
 import recipe_scale
 import recipe_steps
@@ -49,6 +50,33 @@ from recipe_store import RecipeStore
 # The backfilled pantry has ~106 unsorted rows; showing them all would render
 # every item twice and make the page unusable on a phone.
 SECTION_SORTER_BATCH = 15
+
+
+def _batch_summary_message(staged_count, failed_count):
+    """Build the "N ready; M failed" line shown after an upload redirect.
+
+    Kept as a pure function (no db/request access) so the wording is easy to
+    reason about and test on its own.
+    """
+    parts = []
+    if staged_count:
+        parts.append(f"{staged_count} item{'' if staged_count == 1 else 's'} ready to review")
+    if failed_count:
+        parts.append(
+            f"{failed_count} photo{'' if failed_count == 1 else 's'} could not be read"
+        )
+    return "; ".join(parts) + "." if parts else None
+
+
+def _recipe_shop_summary_message(added_count):
+    """Build the notice line shown on recipe_detail after 'Add selected to
+    shopping list' redirects back -- see recipe_shop/recipe_detail."""
+    if added_count == 0:
+        return "Nothing was added to the shopping list."
+    return (
+        f"Added {added_count} ingredient{'' if added_count == 1 else 's'} "
+        "to the shopping list."
+    )
 
 
 class User(UserMixin):
@@ -249,45 +277,210 @@ def create_app():
             active="home",
         )
 
-    def _render_inventory_page(storage):
-        query = request.args.get("q", "").strip().lower()
-        items = db.list_items(get_db(), storage=storage)
-        if query:
-            items = [item for item in items if query in item["name"].lower()]
+    @app.route("/add")
+    @login_required
+    def add_chooser():
+        """The single shared "start adding something" destination.
+
+        Organized by intent (Groceries / Recipe / Household item), not by
+        the backend route that ends up handling it -- a user shouldn't have
+        to already know the word "Capture" to add groceries. Each intent
+        hands off to whichever existing route/page does the actual work;
+        this page adds no new backend behavior of its own. Recipe's methods
+        already live at the top of the Recipes page (Task 3), so that tile
+        links straight there rather than duplicating those two buttons
+        here; Household item has only one method (Import's photo flow), so
+        it skips a method-choice screen entirely.
+        """
+        return render_template("add.html", active="add")
+
+    @app.route("/add/groceries")
+    @login_required
+    def add_groceries():
+        """Groceries' method choice: type it in, or a photo.
+
+        This is the screen a contextual "Add" control (e.g. on Pantry or
+        Freezer) jumps straight to, skipping the top-level intent chooser
+        above since the intent -- groceries -- is already known from
+        context.
+        """
+        return render_template("add_groceries.html", active="add")
+
+    # The four summary views offered above the inventory rows. "all" is the
+    # default and is never put in the query string (a bare /pantry means
+    # "all"); the other three key straight into expiry.split_by_expiry()'s
+    # two buckets and the existing "no section" check, so filtering never
+    # reimplements that logic.
+    INVENTORY_FILTERS = ("all", "expired", "expiring_soon", "unsorted")
+
+    def _render_inventory_page(
+        storage,
+        query=None,
+        filter_key=None,
+        add_errors=None,
+        add_values=None,
+        edit_error=None,
+        edit_values=None,
+        undo_id=None,
+        undo_name=None,
+    ):
+        if query is None:
+            query = request.args.get("q", "")
+        query = query.strip()
+        query_lc = query.lower()
+
+        if filter_key is None:
+            filter_key = request.args.get("filter", "all")
+        if filter_key not in INVENTORY_FILTERS:
+            filter_key = "all"
+
+        # Undo affordance (see inventory_delete): a one-shot indicator carried
+        # as query params on the redirect that follows a delete. There's no
+        # separate time-based expiry -- the banner is only ever rendered on
+        # this one page render, and restoring stays valid for as long as the
+        # row is still soft-deleted (see db.restore_item's docstring).
+        if undo_id is None:
+            raw_undo_id = request.args.get("undo_id")
+            try:
+                undo_id = int(raw_undo_id) if raw_undo_id else None
+            except (TypeError, ValueError):
+                undo_id = None
+        if undo_name is None:
+            undo_name = request.args.get("undo_name")
+
+        add_errors = add_errors or []
+        add_errors_by_field = {err["field_id"]: err["message"] for err in add_errors}
+
+        edit_error = edit_error or {}
+        edit_errors = edit_error.get("errors") or []
+        edit_errors_by_field = {err["field_id"]: err["message"] for err in edit_errors}
+
+        raw_items = db.list_items(get_db(), storage=storage)
+        is_storage_empty = not raw_items
+
+        items = (
+            [item for item in raw_items if query_lc in item["name"].lower()]
+            if query_lc
+            else raw_items
+        )
+        # Mutates every dict in `items` in place (effective_expiry,
+        # effective_expiry_estimated, expiry_status) -- expired/expiring_soon
+        # below share those same objects, as does unsectioned_all, so the
+        # rows keep their expiry markers no matter which filter is shown.
         expired, expiring_soon = expiry.split_by_expiry(items, storage=storage)
-        unsectioned = [item for item in items if not item.get("section")]
+        unsectioned_all = [item for item in items if not item.get("section")]
+
+        filtered_items = {
+            "all": items,
+            "expired": expired,
+            "expiring_soon": expiring_soon,
+            "unsorted": unsectioned_all,
+        }[filter_key]
+
         return render_template(
             "inventory.html",
             storage=storage,
             user=current_user.id,
             items=items,
-            groups=sections.group_items(items, storage),
+            groups=sections.group_items(filtered_items, storage),
             all_sections=sections.sections_for(storage),
-            unsectioned=unsectioned[:SECTION_SORTER_BATCH],
-            unsectioned_total=len(unsectioned),
-            expired=expired,
-            expiring_soon=expiring_soon,
+            unsectioned=unsectioned_all[:SECTION_SORTER_BATCH],
+            unsectioned_total=len(unsectioned_all),
+            expired_count=len(expired),
+            expiring_soon_count=len(expiring_soon),
+            is_storage_empty=is_storage_empty,
             query=query,
+            active_filter=filter_key,
+            add_errors=add_errors,
+            add_errors_by_field=add_errors_by_field,
+            add_values=add_values or {},
+            edit_error=edit_error,
+            edit_errors_by_field=edit_errors_by_field,
+            edit_values=edit_values or {},
+            undo_id=undo_id,
+            undo_name=undo_name,
             active=storage,
         )
 
+    def _inventory_redirect(
+        storage, query="", filter_key="all", item_id=None, undo_id=None, undo_name=None
+    ):
+        """Redirect back to a storage page, preserving search/filter state.
+
+        Restores `q` and `filter` as query params (when not their defaults)
+        and, when acting on a single row, appends a `#row-N` fragment so the
+        browser scrolls back to it -- this is what keeps an adjust/edit/
+        delete from dropping the user back on the unfiltered top of the list.
+
+        `undo_id`/`undo_name`, when given, carry the just-deleted item's
+        identity as one-shot query params so the very next render can show
+        the Undo banner -- see _render_inventory_page and inventory_delete.
+        """
+        kwargs = {}
+        if query:
+            kwargs["q"] = query
+        if filter_key and filter_key != "all":
+            kwargs["filter"] = filter_key
+        if undo_id is not None:
+            kwargs["undo_id"] = undo_id
+            kwargs["undo_name"] = undo_name
+        anchor = f"row-{item_id}" if item_id is not None else None
+        return redirect(url_for(storage, _anchor=anchor, **kwargs))
+
     def _add_inventory_item(storage):
-        expiry_date = request.form.get("expiry_date", "").strip() or None
-        acquired_date = request.form.get("acquired_date", "").strip() or None
-        shelf_life_days = request.form.get("shelf_life_days", "").strip() or None
+        name = request.form.get("name", "").strip()
+        quantity_raw = request.form.get("quantity", "").strip()
+        query = request.form.get("q", "")
+        filter_key = request.form.get("filter") or "all"
+
+        errors = []
+        quantity = None
+        if not name:
+            errors.append({"field_id": "name", "message": "Give the item a name."})
+        elif not quantity_raw:
+            errors.append({"field_id": "quantity", "message": "Enter a quantity."})
+        else:
+            try:
+                quantity = float(quantity_raw)
+            except ValueError:
+                errors.append({"field_id": "quantity", "message": "Quantity must be a number."})
+
+        shelf_life_days = None
+        if not errors:
+            shelf_life_raw = request.form.get("shelf_life_days", "").strip()
+            if shelf_life_raw:
+                try:
+                    shelf_life_days = int(shelf_life_raw)
+                except ValueError:
+                    errors.append(
+                        {
+                            "field_id": "shelf_life_days",
+                            "message": "Shelf life override must be a whole number of days.",
+                        }
+                    )
+
+        if errors:
+            return _render_inventory_page(
+                storage,
+                query=query,
+                filter_key=filter_key,
+                add_errors=errors,
+                add_values=request.form,
+            )
+
         db.add_item(
             get_db(),
-            name=request.form["name"].strip(),
-            quantity=float(request.form.get("quantity") or 0),
+            name=name,
+            quantity=quantity,
             unit=request.form.get("unit", "").strip(),
             location=request.form.get("location", "").strip(),
             storage=storage,
-            expiry_date=expiry_date,
-            acquired_date=acquired_date,
-            shelf_life_days=int(shelf_life_days) if shelf_life_days else None,
+            expiry_date=request.form.get("expiry_date", "").strip() or None,
+            acquired_date=request.form.get("acquired_date", "").strip() or None,
+            shelf_life_days=shelf_life_days,
             section=sections.normalize(storage, request.form.get("section")),
         )
-        return redirect(url_for(storage))
+        return _inventory_redirect(storage, query=query, filter_key=filter_key)
 
     @app.route("/pantry")
     @login_required
@@ -309,39 +502,109 @@ def create_app():
     def freezer_add():
         return _add_inventory_item("freezer")
 
-    def _redirect_to_storage_page():
+    def _redirect_to_storage_page(item_id=None, undo_id=None, undo_name=None):
         storage = request.form.get("storage") or "pantry"
-        return redirect(url_for(storage if storage in ("pantry", "freezer") else "pantry"))
+        if storage not in ("pantry", "freezer"):
+            storage = "pantry"
+        return _inventory_redirect(
+            storage,
+            query=request.form.get("q", "").strip(),
+            filter_key=request.form.get("filter") or "all",
+            item_id=item_id,
+            undo_id=undo_id,
+            undo_name=undo_name,
+        )
 
     @app.route("/inventory/<int:item_id>/adjust", methods=["POST"])
     @login_required
     def inventory_adjust(item_id):
-        db.adjust_quantity(get_db(), item_id, delta=float(request.form["delta"]))
-        return _redirect_to_storage_page()
+        try:
+            delta = float(request.form["delta"])
+        except (KeyError, ValueError):
+            abort(400)
+        db.adjust_quantity(get_db(), item_id, delta=delta)
+        return _redirect_to_storage_page(item_id=item_id)
 
     @app.route("/inventory/<int:item_id>/delete", methods=["POST"])
     @login_required
     def inventory_delete(item_id):
-        db.delete_item(get_db(), item_id)
-        return _redirect_to_storage_page()
+        conn = get_db()
+        # Fetched before the soft-delete purely to carry the item's name
+        # through to the Undo banner on the next render -- the row itself
+        # isn't touched by this lookup. Order matters: get_item only sees
+        # live rows, so this must run before delete_item marks it deleted.
+        item = db.get_item(conn, item_id)
+        db.delete_item(conn, item_id)
+        return _redirect_to_storage_page(
+            undo_id=item_id, undo_name=item["name"] if item else None
+        )
+
+    @app.route("/inventory/<int:item_id>/restore", methods=["POST"])
+    @login_required
+    def inventory_restore(item_id):
+        """Undo an inventory delete. See db.restore_item for the idempotency
+        and undo-window notes -- there's no separate time-based expiry here;
+        this is accepted for as long as the row is still soft-deleted."""
+        db.restore_item(get_db(), item_id)
+        return _redirect_to_storage_page(item_id=item_id)
 
     @app.route("/inventory/<int:item_id>/update", methods=["POST"])
     @login_required
     def inventory_update(item_id):
-        shelf_life_days = request.form.get("shelf_life_days", "").strip()
         storage = request.form.get("storage") or "pantry"
+        if storage not in ("pantry", "freezer"):
+            storage = "pantry"
+        query = request.form.get("q", "")
+        filter_key = request.form.get("filter") or "all"
+
+        quantity_raw = request.form.get("quantity", "").strip()
+        errors = []
+        quantity = None
+        if not quantity_raw:
+            errors.append({"field_id": f"quantity-{item_id}", "message": "Enter a quantity."})
+        else:
+            try:
+                quantity = float(quantity_raw)
+            except ValueError:
+                errors.append(
+                    {"field_id": f"quantity-{item_id}", "message": "Quantity must be a number."}
+                )
+
+        shelf_life_days = None
+        if not errors:
+            shelf_life_raw = request.form.get("shelf_life_days", "").strip()
+            if shelf_life_raw:
+                try:
+                    shelf_life_days = int(shelf_life_raw)
+                except ValueError:
+                    errors.append(
+                        {
+                            "field_id": f"shelf-life-{item_id}",
+                            "message": "Shelf life override must be a whole number of days.",
+                        }
+                    )
+
+        if errors:
+            return _render_inventory_page(
+                storage,
+                query=query,
+                filter_key=filter_key,
+                edit_error={"item_id": item_id, "errors": errors},
+                edit_values=request.form,
+            )
+
         db.update_item(
             get_db(),
             item_id,
-            quantity=float(request.form.get("quantity") or 0),
+            quantity=quantity,
             unit=request.form.get("unit", "").strip(),
             location=request.form.get("location", "").strip(),
             expiry_date=request.form.get("expiry_date", "").strip() or None,
             acquired_date=request.form.get("acquired_date", "").strip() or None,
-            shelf_life_days=int(shelf_life_days) if shelf_life_days else None,
+            shelf_life_days=shelf_life_days,
             section=sections.normalize(storage, request.form.get("section")),
         )
-        return _redirect_to_storage_page()
+        return _redirect_to_storage_page(item_id=item_id)
 
     @app.route("/inventory/sections", methods=["POST"])
     @login_required
@@ -363,17 +626,42 @@ def create_app():
     @app.route("/shopping-list")
     @login_required
     def shopping_list():
-        list_items = db.list_shopping_list_items(get_db())
+        conn = get_db()
+        list_items = db.list_shopping_list_items(conn)
+        active_items = [item for item in list_items if not item["purchased"]]
+        purchased_items = [item for item in list_items if item["purchased"]]
+        # Fresh/untracked items have no inventory decision to make, so they
+        # never need a suggested match -- only shelf-stable/frozen purchased
+        # items go through the same matching flow the old inline check-off
+        # panel used, just moved here to happen at Finish-shopping time.
+        review_items = [item for item in purchased_items if item["storage"] != "fresh"]
+        fresh_purchased_items = [
+            item for item in purchased_items if item["storage"] == "fresh"
+        ]
         suggestions = {}
-        for list_item in list_items:
-            candidates = db.list_items(get_db(), storage=list_item["storage"])
-            suggestions[list_item["id"]] = matching.find_best_match(
-                list_item["name"], candidates
-            )
+        for item in review_items:
+            candidates = db.list_items(conn, storage=item["storage"])
+            suggestions[item["id"]] = matching.find_best_match(item["name"], candidates)
+
+        # Undo affordance (see shopping_list_delete): same one-shot query-param
+        # pattern as the inventory pages -- no separate time-based expiry,
+        # the banner is only ever rendered on this one page render.
+        raw_undo_id = request.args.get("undo_id")
+        try:
+            undo_id = int(raw_undo_id) if raw_undo_id else None
+        except (TypeError, ValueError):
+            undo_id = None
         return render_template(
             "shopping_list.html",
-            list_items=list_items,
+            active_items=active_items,
+            purchased_items=purchased_items,
+            review_items=review_items,
+            fresh_purchased_items=fresh_purchased_items,
+            purchased_count=len(purchased_items),
+            total_count=len(list_items),
             suggestions=suggestions,
+            undo_id=undo_id,
+            undo_name=request.args.get("undo_name"),
             active="shopping-list",
         )
 
@@ -381,61 +669,209 @@ def create_app():
     @login_required
     def shopping_list_add():
         quantity_to_buy = request.form.get("quantity_to_buy", "").strip()
+        amount_note = request.form.get("amount_note", "").strip()
         db.add_shopping_list_item(
             get_db(),
             name=request.form["name"].strip(),
             storage=request.form.get("storage", "pantry"),
             quantity_to_buy=float(quantity_to_buy) if quantity_to_buy else None,
+            amount_note=amount_note or None,
         )
+        return redirect(url_for("shopping_list"))
+
+    @app.route("/shopping-list/<int:item_id>/toggle-purchased", methods=["POST"])
+    @login_required
+    def shopping_list_toggle_purchased(item_id):
+        """Flip the persisted purchased checkbox. Deliberately does nothing
+        else: no inventory read or write happens here, in either direction
+        -- see db.set_shopping_list_item_purchased. Reversible any number of
+        times as long as the item hasn't been reconciled by Finish shopping
+        yet (once reconciled, the row is soft-deleted and this 404s, same as
+        every other action against a gone item)."""
+        conn = get_db()
+        item = db.get_shopping_list_item(conn, item_id)
+        if item is None:
+            abort(404)
+        db.set_shopping_list_item_purchased(conn, item_id, purchased=not item["purchased"])
         return redirect(url_for("shopping_list"))
 
     @app.route("/shopping-list/<int:item_id>/delete", methods=["POST"])
     @login_required
     def shopping_list_delete(item_id):
-        db.delete_shopping_list_item(get_db(), item_id)
+        conn = get_db()
+        # Fetched before the soft-delete purely to carry the item's name
+        # through to the Undo banner on the next render. Order matters:
+        # get_shopping_list_item only sees live rows, so this must run
+        # before delete_shopping_list_item marks it deleted.
+        item = db.get_shopping_list_item(conn, item_id)
+        db.delete_shopping_list_item(conn, item_id)
+        return redirect(
+            url_for(
+                "shopping_list",
+                undo_id=item_id,
+                undo_name=item["name"] if item else None,
+            )
+        )
+
+    @app.route("/shopping-list/<int:item_id>/restore", methods=["POST"])
+    @login_required
+    def shopping_list_restore(item_id):
+        """Undo a shopping-list removal. See db.restore_shopping_list_item for
+        the idempotency and undo-window notes -- there's no separate
+        time-based expiry here; this is accepted for as long as the row is
+        still soft-deleted."""
+        db.restore_shopping_list_item(get_db(), item_id)
         return redirect(url_for("shopping_list"))
 
-    @app.route("/shopping-list/<int:item_id>/resolve", methods=["POST"])
+    @app.route("/shopping-list/finish", methods=["POST"])
     @login_required
-    def shopping_list_resolve(item_id):
-        list_item = db.get_shopping_list_item(get_db(), item_id)
-        if list_item is None:
-            abort(404)
-        quantity = float(request.form.get("quantity") or 0)
-        action = request.form.get("action")
+    def shopping_list_finish():
+        """Reconcile every currently-purchased item: shelf-stable/frozen
+        items get the match-or-new-item treatment (same matching.find_best_match
+        flow as the old inline check-off panel, just happening here instead,
+        using whichever choice the Purchased section's review form
+        submitted for each item), while fresh/untracked items just complete
+        with no inventory write at all -- there's no decision to make for
+        them.
 
-        if action == "match":
-            matched_item_id = int(request.form["matched_item_id"])
-            db.adjust_quantity(get_db(), matched_item_id, delta=quantity)
-        else:
-            db.add_item(
-                get_db(),
-                name=list_item["name"],
-                quantity=quantity,
-                unit="",
-                location="",
-                storage=list_item["storage"],
-            )
+        Idempotency (the core correctness requirement for this task):
+        db.claim_shopping_list_item_for_finish atomically flips each item's
+        reconciled_at from NULL to a timestamp, and only the call that wins
+        that flip goes on to touch inventory. A duplicate submission of the
+        same purchased set -- a double click, a retried POST -- finds every
+        item already claimed (or already soft-deleted from the prior run)
+        and no-ops for all of them, so inventory is never double-applied.
 
-        db.delete_shopping_list_item(get_db(), item_id)
+        Every suggested match still requires the user's own choice from the
+        review form rendered on GET /shopping-list -- nothing here computes
+        or applies a match on its own; it only carries out whichever action
+        the user already selected.
+
+        Stale-resubmission guard: a non-fresh item is only ever claimed and
+        reconciled if this POST actually carries its `action-<id>` field.
+        A field-less submission -- e.g. a browser back-button resubmit of a
+        Finish-shopping page rendered before this item was even purchased,
+        or before it existed -- means the review form never asked about
+        this item, so there's no confirmed choice to act on. Skipping it
+        (rather than defaulting to "new" with a guessed-at quantity) leaves
+        it purchased-but-unreconciled for a future, properly-rendered
+        Finish-shopping submission instead of silently creating a phantom
+        inventory row. Fresh/untracked items have no such field to check --
+        there's no decision for them to submit in the first place.
+        """
+        conn = get_db()
+        for item in db.list_shopping_list_items(conn):
+            if not item["purchased"]:
+                continue
+
+            if item["storage"] != "fresh":
+                action_field = f"action-{item['id']}"
+                quantity_field = f"quantity-{item['id']}"
+                if action_field not in request.form or not request.form.get(quantity_field):
+                    continue
+                action = request.form[action_field]
+                try:
+                    quantity = float(request.form[quantity_field])
+                except ValueError:
+                    # Crafted/malformed quantity on a resubmitted or
+                    # hand-edited POST -- skip this item rather than crash
+                    # the whole batch; it stays purchased-but-unreconciled
+                    # for a future, properly-formed Finish-shopping
+                    # submission.
+                    continue
+
+                matched_item_id = None
+                if action == "match":
+                    matched_item_id_raw = request.form.get(
+                        f"matched_item_id-{item['id']}"
+                    )
+                    if matched_item_id_raw:
+                        try:
+                            matched_item_id = int(matched_item_id_raw)
+                        except ValueError:
+                            # Malformed id -- skip rather than crash.
+                            continue
+                        if db.get_item(conn, matched_item_id) is None:
+                            # The matched inventory row was deleted (or
+                            # never existed) since this Finish-shopping
+                            # page was rendered. Don't claim -- leave the
+                            # item purchased-but-unreconciled instead of
+                            # reconciling it while its target write
+                            # silently no-ops (matches the stale-
+                            # resubmission guard's philosophy above).
+                            continue
+
+                if not db.claim_shopping_list_item_for_finish(conn, item["id"]):
+                    # Already reconciled by an earlier Finish-shopping call
+                    # -- no-op, do not touch inventory again.
+                    continue
+
+                if action == "match":
+                    if matched_item_id is not None:
+                        if not db.adjust_quantity(conn, matched_item_id, delta=quantity):
+                            # Extremely unlikely race: the row vanished
+                            # between the check above and this write,
+                            # within the same request. The claim already
+                            # committed and can't be undone, so leave the
+                            # list item in place (purchased, reconciled)
+                            # rather than silently deleting it -- a
+                            # visible orphan beats a vanished one.
+                            continue
+                else:
+                    db.add_item(
+                        conn,
+                        name=item["name"],
+                        quantity=quantity,
+                        unit="",
+                        location="",
+                        storage=item["storage"],
+                    )
+            else:
+                if not db.claim_shopping_list_item_for_finish(conn, item["id"]):
+                    continue
+                # Fresh/untracked items fall straight through with no
+                # inventory write -- "completing" one is just removing it.
+
+            db.delete_shopping_list_item(conn, item["id"])
+
         return redirect(url_for("shopping_list"))
 
     @app.route("/import")
     @login_required
     def import_review():
-        pending = db.list_staging_items(get_db(), status="pending")
+        conn = get_db()
+        pending = db.list_staging_items(conn, status="pending")
+        failed = db.list_staging_items(conn, status="failed")
         suggestions = {}
         for staging_item in pending:
             if staging_item["target_type"] == "inventory":
                 candidates = db.list_items(
-                    get_db(), storage=staging_item.get("storage") or "pantry"
+                    conn, storage=staging_item.get("storage") or "pantry"
                 )
                 suggestions[staging_item["id"]] = matching.find_best_match(
                     staging_item["name"], candidates
                 )
+
+        # ?batch=<id> is set only on the redirect right after an upload (the
+        # same one-shot query-param pattern as push_failed below) -- it scopes
+        # the summary line to *that* request instead of every pending/failed
+        # row that happens to exist, and it's read from the database here
+        # rather than trusted from the query string, so the counts always
+        # reflect what actually got persisted.
+        batch_id = request.args.get("batch")
+        batch_summary = None
+        if batch_id:
+            batch_failed = [item for item in failed if item.get("batch_id") == batch_id]
+            staged_count = sum(1 for item in pending if item.get("batch_id") == batch_id)
+            message = _batch_summary_message(staged_count, len(batch_failed))
+            if message:
+                batch_summary = {"message": message, "had_failures": bool(batch_failed)}
+
         return render_template(
             "import_review.html",
             items=pending,
+            groups=db.group_staging_items_by_photo(pending),
+            failed_items=failed,
             suggestions=suggestions,
             categories=app.catalog.categories(),
             section_choices={
@@ -443,6 +879,7 @@ def create_app():
                 "freezer": sections.sections_for("freezer"),
             },
             push_failed=request.args.get("push_failed"),
+            batch_summary=batch_summary,
             active="import",
         )
 
@@ -462,26 +899,47 @@ def create_app():
                     error="AI import isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY.",
                 )
 
+            # One id ties every row this request produces -- staged or
+            # failed -- together, so the review page can report on *this*
+            # upload specifically after the redirect (see import_review).
+            batch_id = uuid.uuid4().hex
             staged = 0
             failures = []
             for photo in photos:
                 ext = os.path.splitext(photo.filename)[1] or ".jpg"
                 upload_path = os.path.join(uploads_dir, f"{uuid.uuid4().hex}{ext}")
                 photo.save(upload_path)
+                media_type = photo.mimetype or "image/jpeg"
 
                 try:
                     with open(upload_path, "rb") as f:
                         rows = ai_extract.extract_from_image(
-                            f.read(), photo.mimetype or "image/jpeg", api_key=api_key
+                            f.read(), media_type, api_key=api_key
                         )
                 except ai_extract.ExtractionError as exc:
                     # One unreadable shelf photo shouldn't discard the rest of
-                    # the batch -- record it and carry on.
+                    # the batch -- record it and carry on. This is persisted
+                    # as a 'failed' staging row (not just kept in `failures`
+                    # for this request) so it survives the redirect and can
+                    # be retried without re-uploading -- the file is already
+                    # saved at upload_path.
                     failures.append(f"{photo.filename}: {exc}")
+                    db.add_staging_item(
+                        get_db(),
+                        target_type="failed",
+                        name=photo.filename,
+                        status="failed",
+                        error=str(exc),
+                        media_type=media_type,
+                        source_image_path=upload_path,
+                        batch_id=batch_id,
+                    )
                     continue
 
                 for row in rows:
-                    db.add_staging_item(get_db(), source_image_path=upload_path, **row)
+                    db.add_staging_item(
+                        get_db(), source_image_path=upload_path, batch_id=batch_id, **row
+                    )
                     staged += 1
 
             if not staged:
@@ -489,7 +947,7 @@ def create_app():
                     "import_upload.html",
                     error="; ".join(failures) or "Nothing could be read from those photos.",
                 )
-            return redirect(url_for("import_review"))
+            return redirect(url_for("import_review", batch=batch_id))
 
         return render_template("import_upload.html", error=None)
 
@@ -500,10 +958,12 @@ def create_app():
     )
 
     def _parse_ingredient_lines(text):
-        """Parse the textarea format into ingredient dicts.
+        """Parse the `name | quantity | unit | flags` textarea format.
 
-        A plain-text box beats a dynamic add-a-row widget here: it pastes,
-        it dictates, and it is trivially editable.
+        This is the Advanced escape hatch (see `_parse_ingredient_rows` for
+        the ordinary-controls row editor that now fronts it): some users
+        still want to paste or bulk-edit, and a plain-text box beats a
+        dynamic add-a-row widget for that.
         """
         ingredients = []
         for line in (text or "").splitlines():
@@ -524,6 +984,51 @@ def create_app():
             )
         return ingredients
 
+    def _parse_ingredient_rows(form):
+        """Parse the row-editor's structured POST fields into ingredient dicts.
+
+        Each row is four parallel fields (`ingredient_row`/`_name`/`_quantity`/
+        `_unit`, one entry per row, in row order) plus two checkbox fields
+        (`ingredient_fresh`/`_staple`) whose *values* are the row ids of the
+        checked rows -- checkboxes don't submit when unchecked, so a flat
+        parallel list would lose alignment; keying by row id instead doesn't.
+        A row with no name is dropped, matching "only the name is required".
+        """
+        row_ids = form.getlist("ingredient_row")
+        names = form.getlist("ingredient_name")
+        quantities = form.getlist("ingredient_quantity")
+        units = form.getlist("ingredient_unit")
+        fresh_rows = set(form.getlist("ingredient_fresh"))
+        staple_rows = set(form.getlist("ingredient_staple"))
+
+        ingredients = []
+        for index, row_id in enumerate(row_ids):
+            name = names[index].strip() if index < len(names) else ""
+            if not name:
+                continue
+            quantity = quantities[index].strip() if index < len(quantities) else ""
+            unit = units[index].strip() if index < len(units) else ""
+            ingredients.append(
+                recipe_loader.normalize_ingredient(
+                    {
+                        "name": name,
+                        "quantity": quantity or None,
+                        "unit": unit or None,
+                        "fresh": row_id in fresh_rows,
+                        "staple": row_id in staple_rows,
+                    }
+                )
+            )
+        return ingredients
+
+    def _select_ingredients(form):
+        """Structured rows win unless the raw Advanced box was the one
+        actually edited (see `ingredients_source`, flipped by JS) or the
+        page has no row fields at all (an old-style raw-only POST)."""
+        if form.get("ingredients_source") != "advanced" and "ingredient_row" in form:
+            return _parse_ingredient_rows(form)
+        return _parse_ingredient_lines(form.get("ingredients"))
+
     @app.route("/recipes")
     @login_required
     def recipes():
@@ -531,15 +1036,42 @@ def create_app():
         max_effort = request.args.get("max_effort")
         category = request.args.get("category") or None
         favorites_only = request.args.get("favorites") == "on"
+        query = request.args.get("q", "").strip()
+        try:
+            parsed_max_effort = int(max_effort) if max_effort else None
+        except ValueError:
+            # A crafted/stale query string (e.g. max_effort=abc) is treated
+            # as if the filter weren't provided at all, same as absent.
+            parsed_max_effort = None
         matches = app.recipes.filter(
             kind=kind,
             category=category,
-            max_effort=int(max_effort) if max_effort else None,
+            max_effort=parsed_max_effort,
             favorites_only=favorites_only,
+            q=query or None,
         )
         groups = {}
         for recipe in matches:
             groups.setdefault(recipe.kind, []).append(recipe)
+
+        # Human-readable summary of what's currently narrowing the list, so
+        # the page can show it next to the match count and offer a single
+        # "Clear filters" control -- rather than the user having to infer
+        # what's active from which form controls happen to be filled in.
+        active_filters = []
+        if query:
+            active_filters.append(f'search "{query}"')
+        if favorites_only:
+            active_filters.append("Favorites only")
+        if parsed_max_effort is not None:
+            active_filters.append(
+                "effort 1 only" if parsed_max_effort == 1 else f"effort {parsed_max_effort} or less"
+            )
+        if kind:
+            active_filters.append(kind.replace("_", " ").replace("-", " ").title())
+        if category:
+            active_filters.append(category)
+
         return render_template(
             "recipes.html",
             groups=[{"kind": k, "recipes": groups[k]} for k in sorted(groups)],
@@ -549,7 +1081,10 @@ def create_app():
             selected_category=category,
             selected_effort=max_effort,
             favorites_only=favorites_only,
+            query=query,
+            active_filters=active_filters,
             total=len(app.recipes.all()),
+            matched=len(matches),
             active="recipes",
         )
 
@@ -606,9 +1141,10 @@ def create_app():
                 "name": parsed["name"],
                 "kind": parsed["kind"],
                 "serves": parsed["serves"] or "",
-                "ingredients": recipe_writer.ingredients_to_lines(parsed["ingredients"]),
                 "body": parsed["method"],
             },
+            ingredients=parsed["ingredients"],
+            ingredient_lines=recipe_writer.ingredients_to_lines(parsed["ingredients"]),
             from_paste=True,
             ingredient_help=_INGREDIENT_HELP,
             active="recipes",
@@ -619,11 +1155,14 @@ def create_app():
     def recipe_new():
         if request.method == "POST":
             name = request.form.get("name", "").strip()
+            ingredients = _select_ingredients(request.form)
             if not name:
                 return render_template(
                     "recipe_form.html",
                     error="Give the recipe a name.",
                     form=request.form,
+                    ingredients=ingredients,
+                    ingredient_lines=recipe_writer.ingredients_to_lines(ingredients),
                     ingredient_help=_INGREDIENT_HELP,
                     active="recipes",
                 )
@@ -641,7 +1180,7 @@ def create_app():
                 recipes_dir,
                 name=name,
                 frontmatter=frontmatter,
-                ingredients=_parse_ingredient_lines(request.form.get("ingredients")),
+                ingredients=ingredients,
                 body=request.form.get("body", ""),
             )
             app.recipes.reload()
@@ -651,15 +1190,18 @@ def create_app():
             "recipe_form.html",
             error=None,
             form={},
+            ingredients=[],
+            ingredient_lines="",
             ingredient_help=_INGREDIENT_HELP,
             active="recipes",
         )
 
-    def _render_ingredient_editor(recipe, lines, error=None, suggested=False):
+    def _render_ingredient_editor(recipe, ingredients, error=None, suggested=False):
         return render_template(
             "recipe_ingredients.html",
             recipe=recipe,
-            lines=lines,
+            ingredients=ingredients,
+            lines=recipe_writer.ingredients_to_lines(ingredients),
             error=error,
             suggested=suggested,
             ingredient_help=_INGREDIENT_HELP,
@@ -710,24 +1252,27 @@ def create_app():
 
         if request.method == "POST":
             recipe_writer.set_ingredients(
-                recipes_dir,
-                slug,
-                _parse_ingredient_lines(request.form.get("ingredients")),
+                recipes_dir, slug, _select_ingredients(request.form)
             )
             app.recipes.reload()
             return redirect(url_for("recipe_detail", slug=slug))
 
-        return _render_ingredient_editor(
-            recipe, recipe_writer.ingredients_to_lines(recipe.ingredients)
-        )
+        return _render_ingredient_editor(recipe, recipe.ingredients)
 
     def _steps_to_lines(steps):
-        """Render steps as `id | action | input, input` for the editor."""
+        """Render steps as `id | action | input, input` for the Advanced box."""
         return "\n".join(
             f"{s['id']} | {s['action']} | {', '.join(s['inputs'])}" for s in steps or []
         )
 
     def _parse_step_lines(text):
+        """Parse the `id | action | inputs` textarea format.
+
+        This is the Advanced escape hatch. Unlike the row editor, ids here
+        are exactly what the human typed (or `s{line number}` if left
+        blank) -- ids are only auto-numbered by display order when they're
+        never typed at all, i.e. the row editor (see `_parse_step_rows`).
+        """
         steps = []
         for index, line in enumerate((text or "").splitlines(), start=1):
             if not line.strip():
@@ -746,11 +1291,120 @@ def create_app():
             )
         return recipe_loader.normalize_steps(steps)
 
-    def _render_step_editor(recipe, lines, error=None, suggested=False):
+    def _parse_step_rows(form):
+        """Parse the row-editor's structured POST fields into step dicts.
+
+        Each row is a `step_row` id plus a parallel `step_action`, in row
+        order -- that order *is* the display order, since browsers submit
+        repeated fields in document order. Ids are then assigned fresh as
+        s1, s2, ... by that order (see the module docstring in the task
+        brief this implements: the picker only ever offers earlier rows as
+        reference choices, so every reference is structurally guaranteed to
+        land on a lower-numbered id -- no cross-save id-preservation needed).
+
+        Each row's chosen inputs live in their own field, `step_input__<row
+        id>`, since a plain checkbox can't carry which row it belongs to.
+        A checked value is either `ingredient:<name>` (a literal ingredient
+        reference, passed through as-is -- including one that doesn't match
+        any current ingredient, so a stray/legacy reference isn't silently
+        dropped) or `step:<row id>` (translated below to that row's final
+        s-id). A row with neither an action nor any inputs is dropped, on
+        the theory that it's an empty row nobody used.
+        """
+        row_ids = form.getlist("step_row")
+        actions = form.getlist("step_action")
+
+        kept = []
+        for index, row_id in enumerate(row_ids):
+            action = actions[index].strip() if index < len(actions) else ""
+            raw_inputs = form.getlist(f"step_input__{row_id}")
+            if not action and not raw_inputs:
+                continue
+            kept.append((row_id, action, raw_inputs))
+
+        final_ids = {row_id: f"s{i + 1}" for i, (row_id, _, _) in enumerate(kept)}
+
+        steps = []
+        for row_id, action, raw_inputs in kept:
+            inputs = []
+            for raw in raw_inputs:
+                if raw.startswith("ingredient:"):
+                    name = raw[len("ingredient:"):]
+                    if name:
+                        inputs.append(name)
+                elif raw.startswith("step:"):
+                    target = final_ids.get(raw[len("step:"):])
+                    if target:
+                        inputs.append(target)
+            steps.append({"id": final_ids[row_id], "action": action, "inputs": inputs})
+        return recipe_loader.normalize_steps(steps)
+
+    def _select_steps(form):
+        """Structured rows win unless the raw Advanced box was the one
+        actually edited (see `steps_source`, flipped by JS) or the page has
+        no row fields at all (an old-style raw-only POST)."""
+        if form.get("steps_source") != "advanced" and "step_row" in form:
+            return _parse_step_rows(form)
+        return _parse_step_lines(form.get("steps"))
+
+    def _step_rows_for_editor(ingredients, steps):
+        """Build the picker's choices for each step row.
+
+        Row identity for the picker is just each step's position (0-based)
+        in `steps` -- stable for a single render, and all that's needed to
+        say "this row" versus "an earlier row" while building checkboxes.
+        For every row: one checkbox per current ingredient, one per earlier
+        row (labeled with its number and action), checked to match that
+        step's current `inputs` -- plus, for any input that matches
+        neither, an "orphan" checkbox so it's still visible and still
+        round-trips, rather than silently vanishing (this is how an
+        existing recipe with a stale/unmatched reference -- nothing
+        validated that before this task -- shows up for a human to notice
+        and fix, instead of disappearing off the page).
+        """
+        ingredient_names = [ing["name"] for ing in ingredients or []]
+        rows = []
+        for index, step in enumerate(steps or []):
+            remaining = list(step.get("inputs") or [])
+
+            ingredient_options = []
+            for name in ingredient_names:
+                checked = name in remaining
+                if checked:
+                    remaining.remove(name)
+                ingredient_options.append({"name": name, "checked": checked})
+
+            step_options = []
+            for earlier_index, earlier in enumerate(steps[:index]):
+                checked = earlier["id"] in remaining
+                if checked:
+                    remaining.remove(earlier["id"])
+                step_options.append(
+                    {
+                        "uid": str(earlier_index),
+                        "label": f"{earlier_index + 1}. {earlier['action'] or earlier['id']}",
+                        "checked": checked,
+                    }
+                )
+
+            rows.append(
+                {
+                    "uid": str(index),
+                    "action": step.get("action", ""),
+                    "ingredient_options": ingredient_options,
+                    "step_options": step_options,
+                    "orphans": remaining,
+                }
+            )
+        return rows
+
+    def _render_step_editor(recipe, steps, error=None, suggested=False):
         return render_template(
             "recipe_steps.html",
             recipe=recipe,
-            lines=lines,
+            steps=steps,
+            step_rows=_step_rows_for_editor(recipe.ingredients, steps),
+            lines=_steps_to_lines(steps),
             error=error,
             suggested=suggested,
             active="recipes",
@@ -764,13 +1418,17 @@ def create_app():
             abort(404)
 
         if request.method == "POST":
-            recipe_writer.set_steps(
-                recipes_dir, slug, _parse_step_lines(request.form.get("steps"))
-            )
+            steps = _select_steps(request.form)
+            try:
+                recipe_loader.validate_step_order(steps)
+            except recipe_loader.StepOrderError as exc:
+                return _render_step_editor(recipe, steps, error=str(exc))
+
+            recipe_writer.set_steps(recipes_dir, slug, steps)
             app.recipes.reload()
             return redirect(url_for("recipe_detail", slug=slug))
 
-        return _render_step_editor(recipe, _steps_to_lines(recipe.steps))
+        return _render_step_editor(recipe, recipe.steps)
 
     @app.route("/recipes/<slug>/suggest-steps", methods=["POST"])
     @login_required
@@ -779,13 +1437,12 @@ def create_app():
         if recipe is None:
             abort(404)
 
-        current = _steps_to_lines(recipe.steps)
         try:
             api_key = os.environ["HOMEHQ_ANTHROPIC_API_KEY"]
         except KeyError:
             return _render_step_editor(
                 recipe,
-                current,
+                recipe.steps,
                 error="AI generation isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY.",
             )
 
@@ -794,9 +1451,9 @@ def create_app():
                 recipe.name, recipe.ingredients, recipe.body, api_key=api_key
             )
         except ai_extract.ExtractionError as exc:
-            return _render_step_editor(recipe, current, error=str(exc))
+            return _render_step_editor(recipe, recipe.steps, error=str(exc))
 
-        return _render_step_editor(recipe, _steps_to_lines(proposed), suggested=True)
+        return _render_step_editor(recipe, proposed, suggested=True)
 
     @app.route("/recipes/<slug>/suggest-ingredients", methods=["POST"])
     @login_required
@@ -810,13 +1467,12 @@ def create_app():
         if recipe is None:
             abort(404)
 
-        current = recipe_writer.ingredients_to_lines(recipe.ingredients)
         try:
             api_key = os.environ["HOMEHQ_ANTHROPIC_API_KEY"]
         except KeyError:
             return _render_ingredient_editor(
                 recipe,
-                current,
+                recipe.ingredients,
                 error="AI extraction isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY.",
             )
 
@@ -825,11 +1481,30 @@ def create_app():
                 recipe.name, recipe.body, api_key=api_key
             )
         except ai_extract.ExtractionError as exc:
-            return _render_ingredient_editor(recipe, current, error=str(exc))
+            return _render_ingredient_editor(recipe, recipe.ingredients, error=str(exc))
 
-        return _render_ingredient_editor(
-            recipe, recipe_writer.ingredients_to_lines(proposed), suggested=True
-        )
+        return _render_ingredient_editor(recipe, proposed, suggested=True)
+
+    def _combined_inventory(conn):
+        """Pantry + freezer rows in one pool -- a recipe doesn't care where
+        an ingredient lives, so matching.find_best_match is asked to
+        consider both at once (see pantry_check.check_ingredients)."""
+        return db.list_items(conn, storage="pantry") + db.list_items(conn, storage="freezer")
+
+    def _ingredient_amount_note(ingredient):
+        """The recipe's own (already-scaled, if applicable) amount as plain
+        text, e.g. "2 cups" -- the same join the ingredient list itself
+        uses. None when there's nothing recorded, rather than fabricating
+        a placeholder."""
+        parts = []
+        if ingredient.get("quantity"):
+            parts.append(str(ingredient["quantity"]))
+        if ingredient.get("unit"):
+            parts.append(str(ingredient["unit"]))
+        return " ".join(parts) if parts else None
+
+    def _recipe_source_label(recipe):
+        return f"{recipe.name} ({recipe.slug})"
 
     @app.route("/recipes/<slug>")
     @login_required
@@ -851,6 +1526,46 @@ def create_app():
             int(float(target)) if factor != 1 and target else base_serves
         )
         view = request.args.get("view")
+
+        conn = get_db()
+        shop_rows = pantry_check.check_ingredients(ingredients, _combined_inventory(conn))
+        # The field names the shop-panel form posts back (add-<n>/check-<n>)
+        # are keyed on this row's position, so the template needs it
+        # alongside each row -- and recipe_shop below rebuilds the very
+        # same list, in the same order, so the indices line up on submit.
+        for index, row in enumerate(shop_rows):
+            row["index"] = index
+        # Grouped here (rather than with Jinja selectattr chains) so the
+        # bucket->section mapping lives in one obvious place.
+        shop_fresh_missing = [r for r in shop_rows if r["bucket"] in ("fresh", "missing")]
+        shop_on_hand = [r for r in shop_rows if r["bucket"] == "on_hand"]
+        shop_check = [r for r in shop_rows if r["bucket"] == "check"]
+
+        # ?added=<n>&since=<timestamp> is set only on the redirect right
+        # after recipe_shop -- the same one-shot query-param pattern as
+        # import_review's ?batch=. `added` isn't trusted directly: it's
+        # clamped to the count of this recipe's shopping-list rows actually
+        # created at/after `since`, so a hand-edited URL (or items removed
+        # again before this render) can't inflate what the notice claims.
+        shop_notice = None
+        added_param = request.args.get("added")
+        since = request.args.get("since")
+        if added_param is not None and since:
+            try:
+                claimed_added = int(added_param)
+            except ValueError:
+                claimed_added = None
+            if claimed_added is not None:
+                source_recipe = _recipe_source_label(recipe)
+                actual_added = sum(
+                    1
+                    for list_item in db.list_shopping_list_items(conn)
+                    if list_item["source_recipe"] == source_recipe
+                    and list_item["created_at"] >= since
+                )
+                shown_added = min(claimed_added, actual_added)
+                shop_notice = _recipe_shop_summary_message(shown_added)
+
         return render_template(
             "recipe_detail.html",
             recipe=recipe,
@@ -864,7 +1579,91 @@ def create_app():
             shown_serves=shown_serves,
             scaled=factor != 1,
             scale_choices=[1, 2, 4, 6, 8],
+            shop_fresh_missing=shop_fresh_missing,
+            shop_on_hand=shop_on_hand,
+            shop_check=shop_check,
+            shop_notice=shop_notice,
+            raw_serves_param=request.args.get("serves", ""),
             active="recipes",
+        )
+
+    @app.route("/recipes/<slug>/shop", methods=["POST"])
+    @login_required
+    def recipe_shop(slug):
+        """Add the ingredients the user selected on the recipe-detail
+        bucket panel to the shopping list. Only writes to the shopping
+        list -- inventory is never touched here (see pantry_check.py and
+        the plan's four-bucket design).
+
+        Buckets are recomputed here (against whatever inventory looks like
+        right now, same as the GET page) purely to know each selected
+        ingredient's matched storage, if any -- the actual add/don't-add
+        decision comes entirely from which form fields the user's
+        submission carries, never from the bucket itself. A Check-bucket
+        ingredient is only added when its own `check-<n>` field is
+        explicitly "add"; leaving it unresolved (no field, or "have") never
+        adds it. Fresh/on_hand/missing ingredients are only added when
+        their `add-<n>` checkbox is present in the submission -- so an
+        unchecked Fresh or Missing row (even though both start pre-checked
+        in the UI) is just as excluded as one the user never saw.
+        """
+        recipe = app.recipes.get(slug)
+        if recipe is None:
+            abort(404)
+
+        conn = get_db()
+        base_serves = recipe.frontmatter.get("serves")
+        target = request.form.get("serves") or None
+        factor = recipe_scale.factor_for(base_serves, target)
+        ingredients = (
+            recipe_scale.scale(recipe.ingredients, factor)
+            if factor != 1
+            else recipe.ingredients
+        )
+
+        rows = pantry_check.check_ingredients(ingredients, _combined_inventory(conn))
+        source_recipe = _recipe_source_label(recipe)
+
+        # Captured before the add loop so recipe_detail's GET side can
+        # re-derive how many rows this specific request actually wrote
+        # (by comparing against created_at) rather than trusting the
+        # ?added= count directly -- the same one-shot-query-param-plus-
+        # DB-reverification convention Task 10's batch_summary uses.
+        started_at = db.now_iso()
+        added_count = 0
+
+        for index, row in enumerate(rows):
+            if row["bucket"] == "check":
+                selected = request.form.get(f"check-{index}") == "add"
+            else:
+                selected = f"add-{index}" in request.form
+            if not selected:
+                continue
+
+            if row["bucket"] == "fresh":
+                storage = "fresh"
+            elif row["match"] is not None:
+                storage = row["match"]["storage"]
+            else:
+                storage = "pantry"
+
+            db.add_shopping_list_item(
+                conn,
+                name=row["ingredient"]["name"],
+                storage=storage,
+                amount_note=_ingredient_amount_note(row["ingredient"]),
+                source_recipe=source_recipe,
+            )
+            added_count += 1
+
+        return redirect(
+            url_for(
+                "recipe_detail",
+                slug=slug,
+                serves=target,
+                added=added_count,
+                since=started_at,
+            )
         )
 
     @app.route("/capture", methods=["GET", "POST"])
@@ -922,7 +1721,9 @@ def create_app():
     @login_required
     def import_approve(item_id):
         staging_item = db.get_staging_item(get_db(), item_id)
-        if staging_item is None:
+        if staging_item is None or staging_item["target_type"] not in ("inventory", "catalog"):
+            # A 'failed' staging row (an unreadable photo, not an item) has
+            # no approve action -- only Retry/Discard on the review page.
             abort(404)
 
         push_failed = False
@@ -991,6 +1792,75 @@ def create_app():
     def import_reject(item_id):
         db.delete_staging_item(get_db(), item_id)
         return redirect(url_for("import_review"))
+
+    @app.route("/import/<int:item_id>/retry", methods=["POST"])
+    @login_required
+    def import_retry(item_id):
+        """Re-run extraction for one failed photo, without touching the rest
+        of the batch it came from.
+
+        The photo is already saved on disk (source_image_path), so this
+        never asks for a re-upload. The status flip to 'retrying' below is
+        the "server-side batch identity" guard: it claims the row before
+        doing any work, so a duplicate click (or a slow first request still
+        in flight) sees status != 'failed' and no-ops instead of staging the
+        same items twice.
+        """
+        conn = get_db()
+        failed_item = db.get_staging_item(conn, item_id)
+        if failed_item is None:
+            abort(404)
+        if failed_item["status"] != "failed":
+            return redirect(url_for("import_review"))
+        db.set_staging_item_status(conn, item_id, "retrying")
+
+        def _fail_again(message):
+            db.update_staging_item(conn, item_id, error=message)
+            db.set_staging_item_status(conn, item_id, "failed")
+            return redirect(url_for("import_review"))
+
+        try:
+            try:
+                api_key = os.environ["HOMEHQ_ANTHROPIC_API_KEY"]
+            except KeyError:
+                return _fail_again(
+                    "AI import isn't configured yet -- set HOMEHQ_ANTHROPIC_API_KEY."
+                )
+
+            upload_path = failed_item.get("source_image_path")
+            if not upload_path or not os.path.exists(upload_path):
+                return _fail_again(
+                    "That photo is no longer available on the server -- upload it again."
+                )
+
+            media_type = failed_item.get("media_type") or "image/jpeg"
+            try:
+                with open(upload_path, "rb") as f:
+                    rows = ai_extract.extract_from_image(f.read(), media_type, api_key=api_key)
+            except ai_extract.ExtractionError as exc:
+                return _fail_again(str(exc))
+
+            if not rows:
+                return _fail_again("Still nothing readable in that photo.")
+
+            for row in rows:
+                db.add_staging_item(
+                    conn,
+                    source_image_path=upload_path,
+                    batch_id=failed_item.get("batch_id"),
+                    **row,
+                )
+            db.delete_staging_item(conn, item_id)
+            return redirect(url_for("import_review"))
+        except Exception:
+            # Whatever else went wrong (a bug, a raw network exception
+            # ai_extract didn't wrap), the row must not be left stranded in
+            # 'retrying' -- neither pending nor failed, invisible on the
+            # review page and unretryable. Restore the original failure
+            # message and let the 500 propagate like it would anywhere else
+            # in this app.
+            db.set_staging_item_status(conn, item_id, "failed")
+            raise
 
     @app.route("/report")
     @login_required
@@ -1096,6 +1966,34 @@ def create_app():
         if os.path.commonpath([photos_root, requested]) != photos_root:
             abort(404)
         return send_from_directory(photos_root, filename)
+
+    @app.route("/import/<int:item_id>/photo")
+    @login_required
+    def import_staging_photo(item_id):
+        """Serve the source photo for one staged import row.
+
+        Unlike /photos/<path:filename> above, the client never supplies (or
+        sees) a filesystem path here -- only the staging item's own id, which
+        it already has from the review page. The path is looked up
+        server-side from the database, so there is nothing for a client to
+        traverse with. The commonpath check below is a defense-in-depth
+        backstop (matching the posture of the /photos route) in case
+        source_image_path was ever corrupted or pointed outside
+        uploads_dir -- not something a client can influence directly.
+        """
+        staging_item = db.get_staging_item(get_db(), item_id)
+        if staging_item is None or not staging_item.get("source_image_path"):
+            abort(404)
+
+        uploads_root = os.path.realpath(uploads_dir)
+        requested = os.path.realpath(staging_item["source_image_path"])
+        if os.path.commonpath([uploads_root, requested]) != uploads_root:
+            abort(404)
+        if not os.path.isfile(requested):
+            abort(404)
+
+        directory, filename = os.path.split(requested)
+        return send_from_directory(directory, filename)
 
     @app.route("/export/pantry.csv")
     @login_required

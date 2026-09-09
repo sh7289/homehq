@@ -477,3 +477,562 @@ def test_one_bad_photo_does_not_lose_the_others(client, monkeypatch):
     )
 
     assert [i["name"] for i in _staging_items()] == ["rice"]
+
+
+def test_partial_batch_failure_carries_both_outcomes_to_review_page(client, monkeypatch):
+    """The bug this task fixes: redirecting to review used to drop the
+    failure message silently whenever at least one photo succeeded."""
+    import ai_extract
+
+    def fake_extract(image_bytes, media_type, api_key=None):
+        if image_bytes == b"blurry":
+            raise ai_extract.ExtractionError("could not read that one")
+        return [
+            {
+                "target_type": "inventory",
+                "name": "rice",
+                "quantity": 1,
+                "unit": "bag",
+                "storage": "pantry",
+            }
+        ]
+
+    monkeypatch.setattr(ai_extract, "extract_from_image", fake_extract)
+    _login(client)
+
+    response = client.post(
+        "/import/upload",
+        data={
+            "photo": [
+                (io.BytesIO(b"blurry"), "shelf-a.jpg"),
+                (io.BytesIO(b"good"), "shelf-b.jpg"),
+            ]
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    body = response.data.decode()
+    # Both outcomes are visible: the staged item, and the failure for the
+    # photo that could not be read, identified by name.
+    assert "rice" in body
+    assert "shelf-a.jpg" in body
+    assert "could not read that one" in body
+    assert "1 item ready to review" in body
+    assert "1 photo could not be read" in body
+
+    failed = _staging_items(status="failed")
+    assert len(failed) == 1
+    assert failed[0]["name"] == "shelf-a.jpg"
+    assert failed[0]["error"] == "could not read that one"
+    # Preserved: the successful item from the same batch is still there.
+    assert [i["name"] for i in _staging_items()] == ["rice"]
+
+
+def test_retry_of_failed_file_stages_it_without_touching_the_rest(client, monkeypatch):
+    import ai_extract
+
+    def fake_extract(image_bytes, media_type, api_key=None):
+        if image_bytes == b"blurry":
+            raise ai_extract.ExtractionError("could not read that one")
+        return [
+            {
+                "target_type": "inventory",
+                "name": "rice",
+                "quantity": 1,
+                "unit": "bag",
+                "storage": "pantry",
+            }
+        ]
+
+    monkeypatch.setattr(ai_extract, "extract_from_image", fake_extract)
+    _login(client)
+
+    client.post(
+        "/import/upload",
+        data={
+            "photo": [
+                (io.BytesIO(b"blurry"), "shelf-a.jpg"),
+                (io.BytesIO(b"good"), "shelf-b.jpg"),
+            ]
+        },
+        content_type="multipart/form-data",
+    )
+    failed_id = _staging_items(status="failed")[0]["id"]
+
+    # The retry now succeeds -- every call from here on returns the same row.
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: [
+            {
+                "target_type": "inventory",
+                "name": "beans",
+                "quantity": 1,
+                "unit": "can",
+                "storage": "pantry",
+            }
+        ],
+    )
+
+    response = client.post(f"/import/{failed_id}/retry", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert _staging_items(status="failed") == []
+    names = sorted(i["name"] for i in _staging_items())
+    # The originally-successful item ("rice") is untouched, and the retried
+    # photo is now staged too -- with no duplication of the batch's items.
+    assert names == ["beans", "rice"]
+
+
+def test_retrying_a_resolved_failure_is_a_404_not_a_restage(client, monkeypatch):
+    """Once a retry has resolved a failed row (staged it and deleted the
+    row), the id no longer refers to anything -- a second retry POST for the
+    same id (a slow double-submit landing after the first finished) must not
+    silently re-stage anything."""
+    import ai_extract
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: (_ for _ in ()).throw(
+            ai_extract.ExtractionError("nope")
+        ),
+    )
+    _login(client)
+
+    client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"blurry"), "shelf-a.jpg")},
+        content_type="multipart/form-data",
+    )
+    failed_id = _staging_items(status="failed")[0]["id"]
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: [
+            {"target_type": "inventory", "name": "beans", "quantity": 1, "storage": "pantry"}
+        ],
+    )
+
+    client.post(f"/import/{failed_id}/retry")
+    response = client.post(f"/import/{failed_id}/retry")
+
+    assert response.status_code == 404
+    assert [i["name"] for i in _staging_items()] == ["beans"]
+
+
+def test_retry_in_flight_guard_blocks_a_concurrent_duplicate(client, monkeypatch):
+    """Exercises the server-side guard directly: a row already claimed as
+    'retrying' (a first request still in flight) must not be re-processed by
+    a second request for the same id -- this is the "server-side batch
+    identity" the task asks for, not anything client-side."""
+    import ai_extract
+    import db
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: [
+            {"target_type": "inventory", "name": "beans", "quantity": 1, "storage": "pantry"}
+        ],
+    )
+    _login(client)
+
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    failed_id = db.add_staging_item(
+        conn,
+        target_type="failed",
+        name="shelf-a.jpg",
+        status="failed",
+        error="could not read that one",
+        source_image_path=os.path.join(os.environ["HOMEHQ_UPLOADS_DIR"], "shelf-a.jpg"),
+        media_type="image/jpeg",
+    )
+    with open(os.path.join(os.environ["HOMEHQ_UPLOADS_DIR"], "shelf-a.jpg"), "wb") as f:
+        f.write(b"fake")
+    # Simulate a first retry request already in flight, having claimed the
+    # row but not yet finished.
+    db.set_staging_item_status(conn, failed_id, "retrying")
+    conn.close()
+
+    response = client.post(f"/import/{failed_id}/retry", follow_redirects=True)
+
+    assert response.status_code == 200
+    # Nothing staged -- the in-flight guard made this a no-op rather than a
+    # second extraction pass.
+    assert _staging_items() == []
+
+
+def test_retry_unexpected_error_does_not_strand_the_row_in_retrying(client, monkeypatch):
+    """If extraction blows up with something other than ExtractionError (a
+    bug, an unwrapped network error), the row must come back to 'failed'
+    rather than being stuck invisibly in 'retrying' forever. TESTING=True
+    (set by the app fixture) makes Flask re-raise the exception instead of
+    turning it into a 500 response, so this exercises the same code path
+    production's own error handling would hit."""
+    import ai_extract
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: (_ for _ in ()).throw(
+            ai_extract.ExtractionError("nope")
+        ),
+    )
+    _login(client)
+    client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"blurry"), "shelf-a.jpg")},
+        content_type="multipart/form-data",
+    )
+    failed_id = _staging_items(status="failed")[0]["id"]
+
+    def boom(image_bytes, media_type, api_key=None):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(ai_extract, "extract_from_image", boom)
+
+    try:
+        client.post(f"/import/{failed_id}/retry")
+    except RuntimeError:
+        pass
+
+    failed = _staging_items(status="failed")
+    assert len(failed) == 1
+    assert failed[0]["id"] == failed_id
+    assert failed[0]["status"] == "failed"
+
+
+def test_retry_failure_leaves_the_row_retryable_again(client, monkeypatch):
+    import ai_extract
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: (_ for _ in ()).throw(
+            ai_extract.ExtractionError("still blurry")
+        ),
+    )
+    _login(client)
+
+    client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"blurry"), "shelf-a.jpg")},
+        content_type="multipart/form-data",
+    )
+    failed_id = _staging_items(status="failed")[0]["id"]
+
+    response = client.post(f"/import/{failed_id}/retry", follow_redirects=True)
+
+    assert response.status_code == 200
+    failed = _staging_items(status="failed")
+    assert len(failed) == 1
+    assert failed[0]["id"] == failed_id
+    assert failed[0]["error"] == "still blurry"
+    assert b"still blurry" in response.data
+
+
+def test_discard_removes_a_failed_photo_notice(client, monkeypatch):
+    import ai_extract
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: (_ for _ in ()).throw(
+            ai_extract.ExtractionError("nope")
+        ),
+    )
+    _login(client)
+
+    client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"blurry"), "shelf-a.jpg")},
+        content_type="multipart/form-data",
+    )
+    failed_id = _staging_items(status="failed")[0]["id"]
+
+    response = client.post(f"/import/{failed_id}/reject", follow_redirects=True)
+
+    assert response.status_code == 200
+    assert _staging_items(status="failed") == []
+
+
+def test_import_upload_form_disables_submit_while_pending():
+    """Server-verifiable half of the pending-state requirement: the form
+    itself carries the pending-message hook and a polite live region for the
+    client-side JS to drive -- without JS, nothing here should assume the
+    request already completed."""
+    with open("templates/import_upload.html") as f:
+        html = f.read()
+
+    assert 'data-pending-message="Reading photos' in html
+    assert 'aria-live="polite"' in html
+    assert 'role="alert"' not in html
+
+
+def test_retry_form_has_a_live_status_region_that_actually_resolves(client, monkeypatch):
+    """The Retry form sits inside a list row alongside a Discard form, so its
+    next DOM sibling is NOT a status-live element -- unlike the standalone
+    upload/capture/paste forms. It must instead point at its own live region
+    via data-pending-status, and that id must resolve to a real
+    aria-live="polite" element actually present in the rendered page (not
+    just asserted to exist somewhere in the template source)."""
+    import re
+
+    import ai_extract
+    import db
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: (_ for _ in ()).throw(
+            ai_extract.ExtractionError("could not read that one")
+        ),
+    )
+    _login(client)
+    client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"blurry"), "shelf-a.jpg")},
+        content_type="multipart/form-data",
+    )
+    failed_id = _staging_items(status="failed")[0]["id"]
+
+    response = client.get("/import")
+    body = response.data.decode()
+
+    retry_form_match = re.search(
+        r'<form[^>]*action="/import/%d/retry"[^>]*>' % failed_id, body
+    )
+    assert retry_form_match, "expected a retry form for the failed item"
+    retry_form_html = retry_form_match.group(0)
+
+    status_id_match = re.search(r'data-pending-status="([^"]+)"', retry_form_html)
+    assert status_id_match, "retry form must name its own status region"
+    status_id = status_id_match.group(1)
+
+    # That id must resolve to a real element in the page -- not merely be a
+    # string present somewhere -- and that element must be a polite live
+    # region, not role="alert".
+    status_el_match = re.search(
+        r'<span id="%s"([^>]*)></span>' % re.escape(status_id), body
+    )
+    assert status_el_match, f"no element with id={status_id!r} found in the rendered page"
+    status_el_attrs = status_el_match.group(1)
+    assert 'aria-live="polite"' in status_el_attrs
+    assert 'role="status"' in status_el_attrs
+    assert "alert" not in status_el_attrs
+
+
+def test_import_photo_route_requires_login(client):
+    import db
+
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    upload_path = os.path.join(os.environ["HOMEHQ_UPLOADS_DIR"], "shelf.jpg")
+    with open(upload_path, "wb") as f:
+        f.write(b"fake-jpeg-bytes")
+    item_id = db.add_staging_item(
+        conn, target_type="inventory", name="Rice", source_image_path=upload_path
+    )
+    conn.close()
+
+    response = client.get(f"/import/{item_id}/photo")
+
+    assert response.status_code == 302
+    assert "/login" in response.headers["Location"]
+
+
+def test_import_photo_route_serves_the_staging_items_photo(client):
+    import db
+
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    upload_path = os.path.join(os.environ["HOMEHQ_UPLOADS_DIR"], "shelf.jpg")
+    with open(upload_path, "wb") as f:
+        f.write(b"fake-jpeg-bytes")
+    item_id = db.add_staging_item(
+        conn, target_type="inventory", name="Rice", source_image_path=upload_path
+    )
+    conn.close()
+
+    response = client.get(f"/import/{item_id}/photo")
+
+    assert response.status_code == 200
+    assert response.data == b"fake-jpeg-bytes"
+
+
+def test_import_photo_route_404s_for_nonexistent_item(client):
+    _login(client)
+
+    response = client.get("/import/999999/photo")
+
+    assert response.status_code == 404
+
+
+def test_import_photo_route_404s_for_a_text_capture_with_no_photo(client):
+    import db
+
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    item_id = db.add_staging_item(conn, target_type="inventory", name="Onions")
+    conn.close()
+
+    response = client.get(f"/import/{item_id}/photo")
+
+    assert response.status_code == 404
+
+
+def test_import_photo_route_cannot_be_used_to_serve_an_arbitrary_path(client, tmp_path):
+    """The route is keyed on the staging item's own id -- there is no
+    filename/path parameter for a client to supply or manipulate. This test
+    exercises the defensive commonpath backstop directly: even if
+    source_image_path in the database somehow pointed outside uploads_dir
+    (corruption, a bug elsewhere), the route must still refuse to serve it
+    rather than trusting the stored path blindly."""
+    import db
+
+    _login(client)
+    outside_secret = tmp_path / "secret.txt"
+    outside_secret.write_text("top secret")
+
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    item_id = db.add_staging_item(
+        conn, target_type="inventory", name="Rice", source_image_path=str(outside_secret)
+    )
+    conn.close()
+
+    response = client.get(f"/import/{item_id}/photo")
+
+    assert response.status_code == 404
+
+
+def test_import_photo_route_has_no_client_supplied_path_parameter(client):
+    """Sanity check on the URL shape itself: unlike /photos/<path:filename>,
+    this route must not accept a filename/path segment at all -- only the
+    item's own integer id."""
+    import db
+
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    upload_path = os.path.join(os.environ["HOMEHQ_UPLOADS_DIR"], "shelf.jpg")
+    with open(upload_path, "wb") as f:
+        f.write(b"fake")
+    item_id = db.add_staging_item(
+        conn, target_type="inventory", name="Rice", source_image_path=upload_path
+    )
+    conn.close()
+
+    # Appending an arbitrary path segment after the id must not resolve --
+    # the route is /import/<int:item_id>/photo, nothing more.
+    response = client.get(f"/import/{item_id}/photo/../../etc/passwd")
+
+    assert response.status_code == 404
+
+
+def test_review_page_groups_rows_by_source_photo(client):
+    import db
+
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    for name, path in (
+        ("Rice", "/uploads/photo-a.jpg"),
+        ("Beans", "/uploads/photo-a.jpg"),
+        ("Milk", "/uploads/photo-b.jpg"),
+    ):
+        db.add_staging_item(conn, target_type="inventory", name=name, source_image_path=path)
+    conn.close()
+
+    response = client.get("/import")
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    # Two distinct photo previews, one per source image.
+    assert body.count('alt="Photo for Rice"') == 1
+    assert body.count('alt="Photo for Milk"') == 1
+    # Rice and Beans (same photo) appear inside one group; find the group
+    # boundary via the two enlarge links and check both names fall inside
+    # the first one, not split across groups.
+    first_group_end = body.index('alt="Photo for Milk"')
+    assert "Rice" in body[:first_group_end]
+    assert "Beans" in body[:first_group_end]
+
+
+def test_review_page_gives_text_captures_a_no_photo_presentation(client):
+    """A text-capture staging row (no source_image_path) must not render a
+    broken <img> or an empty photo slot."""
+    import db
+
+    _login(client)
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    db.add_staging_item(conn, target_type="inventory", name="Garlic")
+    conn.close()
+
+    response = client.get("/import")
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert "Garlic" in body
+    assert "<img" not in body or "Photo for Garlic" not in body
+    assert "import-group--nophoto" in body
+
+
+def test_review_page_match_panel_shows_unit_and_storage(client):
+    import db
+
+    _login(client)
+    client.post(
+        "/pantry/add",
+        data={"name": "Rice", "quantity": "3", "unit": "bags", "location": ""},
+    )
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    db.init_db(conn)
+    db.add_staging_item(
+        conn, target_type="inventory", name="Rice", quantity=1, storage="pantry"
+    )
+    conn.close()
+
+    response = client.get("/import")
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert "Looks like a match" in body
+    # Matched item's own quantity, unit, and storage are shown, not just its
+    # name and a quantity input for the new value.
+    assert "3" in body
+    assert "bags" in body
+    assert "Pantry" in body
+
+
+def test_upload_page_error_render_has_no_batch_or_failed_rows(client, monkeypatch):
+    """The existing all-failed inline-error path is unchanged: it renders on
+    the upload page itself (no redirect), and the pending 'failed' rows it
+    records are not shown as staged/pending items."""
+    import ai_extract
+
+    monkeypatch.setattr(
+        ai_extract,
+        "extract_from_image",
+        lambda image_bytes, media_type, api_key=None: (_ for _ in ()).throw(
+            ai_extract.ExtractionError("could not read image")
+        ),
+    )
+    _login(client)
+
+    response = client.post(
+        "/import/upload",
+        data={"photo": (io.BytesIO(b"fake-jpeg-bytes"), "receipt.jpg")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    assert _staging_items() == []

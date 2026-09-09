@@ -18,8 +18,8 @@ def finance_app(tmp_path, monkeypatch):
     app.secret_key = 'fixture'
     app.jinja_env.filters['titlecase'] = str.title
     app.add_url_rule('/', 'home', lambda: '')
-    for endpoint in ['pantry', 'freezer', 'recipes', 'shopping_list', 'capture', 'import_review', 'report']:
-        app.add_url_rule('/' + endpoint, endpoint, lambda: '')
+    for endpoint in ['pantry', 'freezer', 'recipes', 'shopping_list', 'capture', 'import_review', 'report', 'logout', 'add_chooser']:
+        app.add_url_rule('/' + endpoint, endpoint, lambda: '', methods=['GET', 'POST'])
     app.context_processor(lambda: {'current_user': types.SimpleNamespace(is_authenticated=True), 'nav_categories': []})
     monkeypatch.setenv('HOMEHQ_FINANCE_ENABLED', 'true')
     path = tmp_path / 'private' / 'finance.db'
