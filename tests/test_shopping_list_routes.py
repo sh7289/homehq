@@ -1,4 +1,5 @@
 import os
+import re
 
 
 def _login(client):
@@ -420,6 +421,112 @@ def test_finish_shopping_on_a_deleted_item_does_not_revive_it(client):
     assert response.status_code == 302
     assert _db_items() == []
     assert _shopping_list() == []
+
+
+def test_finish_shopping_skips_a_match_whose_inventory_row_was_deleted_meanwhile(client):
+    """Important finding #1: the matched inventory row (matched_item_id)
+    can be soft-deleted between the GET that rendered the review form and
+    the Finish-shopping POST. Since claim_shopping_list_item_for_finish is
+    irreversible, this must be detected and the item skipped BEFORE
+    claiming it -- not silently reconciled while its inventory write
+    no-ops -- exactly like the existing stale-resubmission guards above."""
+    _login(client)
+    client.post(
+        "/pantry/add", data={"name": "Rice", "quantity": "2", "unit": "bags", "location": ""}
+    )
+    existing_id = _db_items(storage="pantry")[0]["id"]
+    client.post("/shopping-list/add", data={"name": "Ricee", "storage": "pantry"})
+    list_item_id = _shopping_list()[0]["id"]
+    client.post(f"/shopping-list/{list_item_id}/toggle-purchased")
+
+    # The matched pantry row vanishes after the review page was rendered
+    # but before Finish shopping is submitted.
+    client.post(f"/inventory/{existing_id}/delete")
+
+    response = client.post(
+        "/shopping-list/finish",
+        data={
+            f"action-{list_item_id}": "match",
+            f"matched_item_id-{list_item_id}": str(existing_id),
+            f"quantity-{list_item_id}": "3",
+        },
+    )
+
+    assert response.status_code == 302
+    # Not reconciled, not deleted from the list -- left purchased for a
+    # future, properly-rendered submission.
+    remaining = _shopping_list()
+    assert len(remaining) == 1
+    assert remaining[0]["id"] == list_item_id
+    assert remaining[0]["purchased"] == 1
+    assert remaining[0]["reconciled_at"] is None
+    # And no new inventory row was created either.
+    assert _db_items(storage="pantry") == []
+
+
+def test_finish_shopping_skips_a_match_with_a_malformed_matched_item_id(client):
+    """A crafted/malformed matched_item_id-<id> field must not 500 (int()
+    on a non-numeric value) -- skip the item instead."""
+    _login(client)
+    client.post("/shopping-list/add", data={"name": "Rice", "storage": "pantry"})
+    list_item_id = _shopping_list()[0]["id"]
+    client.post(f"/shopping-list/{list_item_id}/toggle-purchased")
+
+    response = client.post(
+        "/shopping-list/finish",
+        data={
+            f"action-{list_item_id}": "match",
+            f"matched_item_id-{list_item_id}": "not-an-id",
+            f"quantity-{list_item_id}": "3",
+        },
+    )
+
+    assert response.status_code == 302
+    assert _db_items() == []
+    remaining = _shopping_list()
+    assert len(remaining) == 1
+    assert remaining[0]["purchased"] == 1
+    assert remaining[0]["reconciled_at"] is None
+
+
+def test_finish_shopping_skips_a_purchased_item_with_a_non_numeric_quantity_field(client):
+    """A crafted/malformed quantity-<id> field must not 500 (float() on a
+    non-numeric value) -- skip that item, same treatment as the empty-
+    quantity stale-resubmission guard above."""
+    _login(client)
+    client.post("/shopping-list/add", data={"name": "Rice", "storage": "pantry"})
+    item_id = _shopping_list()[0]["id"]
+    client.post(f"/shopping-list/{item_id}/toggle-purchased")
+
+    response = client.post(
+        "/shopping-list/finish",
+        data={f"action-{item_id}": "new", f"quantity-{item_id}": "not-a-number"},
+    )
+
+    assert response.status_code == 302
+    assert _db_items() == []
+    remaining = _shopping_list()
+    assert len(remaining) == 1
+    assert remaining[0]["purchased"] == 1
+    assert remaining[0]["reconciled_at"] is None
+
+
+def test_purchased_toggle_has_a_real_submit_button_fallback(client):
+    """Finding 3a: the checkbox's onchange="this.form.submit()" is a JS-only
+    interaction. Its form must also contain a real <button type="submit">
+    so the purchased toggle still works with JS disabled (a script in
+    base.html hides the button once it confirms JS is present)."""
+    _login(client)
+    client.post("/shopping-list/add", data={"name": "Rice", "storage": "pantry"})
+
+    body = client.get("/shopping-list").data.decode()
+
+    assert re.search(
+        r'<form class="inline-form" method="post" action="/shopping-list/\d+/toggle-purchased">'
+        r'\s*<input type="checkbox"[^>]*>\s*'
+        r'<button class="btn btn--sm purchase-check-submit" type="submit">',
+        body,
+    )
 
 
 def test_source_recipe_renders_when_set(client):

@@ -285,3 +285,77 @@ def test_bogus_serves_value_falls_back_to_the_unscaled_amount(client, app):
 
     item = _shopping_list()[0]
     assert item["amount_note"] == "1 pinch"
+
+
+# --- POST -> GET: success notice (Finding 2) --------------------------------
+
+
+def test_add_selected_redirects_with_a_one_shot_added_count(client, app):
+    """recipe_shop previously gave no confirmation at all -- the redirect
+    must carry a one-shot indicator recipe_detail can turn into a notice."""
+    _setup_chili(client, app)
+
+    response = client.post(
+        "/recipes/chili/shop",
+        data={"serves": "", "add-0": "on", "check-2": "add"},
+    )
+
+    assert response.status_code == 302
+    location = response.headers["Location"]
+    assert "added=2" in location
+    assert "since=" in location
+
+
+def test_recipe_detail_shows_a_notice_after_adding_selected_items(client, app):
+    _setup_chili(client, app)
+
+    response = client.post(
+        "/recipes/chili/shop",
+        data={"serves": "", "add-0": "on", "check-2": "add"},
+        follow_redirects=True,
+    )
+
+    body = response.data.decode()
+    assert "Added 2 ingredients to the shopping list." in body
+    assert 'class="notice notice--success"' in body
+
+
+def test_recipe_detail_shows_nothing_added_when_nothing_was_selected(client, app):
+    _setup_chili(client, app)
+
+    response = client.post(
+        "/recipes/chili/shop", data={"serves": ""}, follow_redirects=True
+    )
+
+    body = response.data.decode()
+    assert "Nothing was added to the shopping list." in body
+
+
+def test_visiting_recipe_detail_directly_shows_no_shop_notice(client, app):
+    """No ?added=/since= on a plain GET -> no notice at all, not a stale
+    leftover from a previous submission."""
+    _setup_chili(client, app)
+
+    body = client.get("/recipes/chili").data.decode()
+
+    assert "to the shopping list." not in body
+
+
+def test_shop_notice_count_is_reverified_against_the_database_not_trusted(client, app):
+    """The ?added=N query param must not be trusted at face value -- a
+    hand-edited/inflated count is clamped to what's actually verifiable in
+    the database (real rows for this recipe created at/after `since`),
+    following the same convention as Task 10's ?batch= re-derivation."""
+    _setup_chili(client, app)
+
+    response = client.post(
+        "/recipes/chili/shop", data={"serves": "", "add-0": "on"}
+    )
+    location = response.headers["Location"]
+    # Hand-inflate the claimed count far beyond what was actually added.
+    tampered = re.sub(r"added=\d+", "added=999", location)
+
+    body = client.get(tampered).data.decode()
+
+    assert "Added 1 ingredient to the shopping list." in body
+    assert "999" not in body

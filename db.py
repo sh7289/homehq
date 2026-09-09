@@ -154,6 +154,15 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def now_iso():
+    """Public wrapper around _now() for callers outside this module (e.g.
+    app.py's recipe_shop) that need a timestamp in the exact format stored
+    in a row's created_at column, so they can later re-derive "what got
+    written by this request" by comparing against created_at rather than
+    trusting a query-string count directly."""
+    return _now()
+
+
 def record_login_failure(conn, identifier, now=None):
     """Count one failed attempt against an identifier and extend its lockout."""
     now = now or datetime.now(timezone.utc)
@@ -262,12 +271,20 @@ def get_item(conn, item_id):
 
 
 def adjust_quantity(conn, item_id, delta):
+    """Adjust a live pantry row's quantity by delta (floored at 0).
+
+    Returns True if a live (not soft-deleted) row was actually updated,
+    False if item_id doesn't exist or is soft-deleted -- callers must check
+    this rather than assuming the write landed, since a soft-deleted or
+    missing id otherwise silently no-ops.
+    """
     with conn:
-        conn.execute(
+        cursor = conn.execute(
             "UPDATE pantry_items SET quantity = MAX(0, quantity + ?), updated_at = ? "
-            "WHERE id = ?",
+            "WHERE id = ? AND deleted_at IS NULL",
             (delta, _now(), item_id),
         )
+        return cursor.rowcount > 0
 
 
 def update_item(

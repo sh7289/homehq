@@ -49,6 +49,38 @@ def test_adjust_quantity_does_not_go_negative(conn):
     assert items[0]["quantity"] == 0
 
 
+def test_adjust_quantity_returns_true_for_a_live_row(conn):
+    import db
+
+    item_id = db.add_item(conn, name="Rice", quantity=2, unit="bags", location="")
+
+    assert db.adjust_quantity(conn, item_id, delta=1) is True
+
+
+def test_adjust_quantity_returns_false_and_no_ops_for_a_soft_deleted_row(conn):
+    """Guards the exact shape of Important finding #1/T13c: adjust_quantity
+    previously updated WHERE id = ? with no deleted_at filter and no way
+    for a caller to tell whether it actually touched a live row. A
+    soft-deleted (or nonexistent) item_id must now no-op and report that
+    back via a False return, not silently succeed."""
+    import db
+
+    item_id = db.add_item(conn, name="Rice", quantity=2, unit="bags", location="")
+    db.delete_item(conn, item_id)
+
+    result = db.adjust_quantity(conn, item_id, delta=5)
+
+    assert result is False
+    row = conn.execute("SELECT quantity FROM pantry_items WHERE id = ?", (item_id,)).fetchone()
+    assert row["quantity"] == 2  # untouched, not 7
+
+
+def test_adjust_quantity_returns_false_for_a_nonexistent_row(conn):
+    import db
+
+    assert db.adjust_quantity(conn, 999999, delta=1) is False
+
+
 def test_delete_item_removes_it(conn):
     import db
 

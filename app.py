@@ -66,6 +66,17 @@ def _batch_summary_message(staged_count, failed_count):
     return "; ".join(parts) + "." if parts else None
 
 
+def _recipe_shop_summary_message(added_count):
+    """Build the notice line shown on recipe_detail after 'Add selected to
+    shopping list' redirects back -- see recipe_shop/recipe_detail."""
+    if added_count == 0:
+        return "Nothing was added to the shopping list."
+    return (
+        f"Added {added_count} ingredient{'' if added_count == 1 else 's'} "
+        "to the shopping list."
+    )
+
+
 class User(UserMixin):
     def __init__(self, username):
         self.id = username
@@ -500,7 +511,11 @@ def create_app():
     @app.route("/inventory/<int:item_id>/adjust", methods=["POST"])
     @login_required
     def inventory_adjust(item_id):
-        db.adjust_quantity(get_db(), item_id, delta=float(request.form["delta"]))
+        try:
+            delta = float(request.form["delta"])
+        except (KeyError, ValueError):
+            abort(400)
+        db.adjust_quantity(get_db(), item_id, delta=delta)
         return _redirect_to_storage_page(item_id=item_id)
 
     @app.route("/inventory/<int:item_id>/delete", methods=["POST"])
@@ -748,7 +763,36 @@ def create_app():
                 if action_field not in request.form or not request.form.get(quantity_field):
                     continue
                 action = request.form[action_field]
-                quantity = float(request.form[quantity_field])
+                try:
+                    quantity = float(request.form[quantity_field])
+                except ValueError:
+                    # Crafted/malformed quantity on a resubmitted or
+                    # hand-edited POST -- skip this item rather than crash
+                    # the whole batch; it stays purchased-but-unreconciled
+                    # for a future, properly-formed Finish-shopping
+                    # submission.
+                    continue
+
+                matched_item_id = None
+                if action == "match":
+                    matched_item_id_raw = request.form.get(
+                        f"matched_item_id-{item['id']}"
+                    )
+                    if matched_item_id_raw:
+                        try:
+                            matched_item_id = int(matched_item_id_raw)
+                        except ValueError:
+                            # Malformed id -- skip rather than crash.
+                            continue
+                        if db.get_item(conn, matched_item_id) is None:
+                            # The matched inventory row was deleted (or
+                            # never existed) since this Finish-shopping
+                            # page was rendered. Don't claim -- leave the
+                            # item purchased-but-unreconciled instead of
+                            # reconciling it while its target write
+                            # silently no-ops (matches the stale-
+                            # resubmission guard's philosophy above).
+                            continue
 
                 if not db.claim_shopping_list_item_for_finish(conn, item["id"]):
                     # Already reconciled by an earlier Finish-shopping call
@@ -756,9 +800,16 @@ def create_app():
                     continue
 
                 if action == "match":
-                    matched_item_id = request.form.get(f"matched_item_id-{item['id']}")
-                    if matched_item_id:
-                        db.adjust_quantity(conn, int(matched_item_id), delta=quantity)
+                    if matched_item_id is not None:
+                        if not db.adjust_quantity(conn, matched_item_id, delta=quantity):
+                            # Extremely unlikely race: the row vanished
+                            # between the check above and this write,
+                            # within the same request. The claim already
+                            # committed and can't be undone, so leave the
+                            # list item in place (purchased, reconciled)
+                            # rather than silently deleting it -- a
+                            # visible orphan beats a vanished one.
+                            continue
                 else:
                     db.add_item(
                         conn,
@@ -979,7 +1030,12 @@ def create_app():
         category = request.args.get("category") or None
         favorites_only = request.args.get("favorites") == "on"
         query = request.args.get("q", "").strip()
-        parsed_max_effort = int(max_effort) if max_effort else None
+        try:
+            parsed_max_effort = int(max_effort) if max_effort else None
+        except ValueError:
+            # A crafted/stale query string (e.g. max_effort=abc) is treated
+            # as if the filter weren't provided at all, same as absent.
+            parsed_max_effort = None
         matches = app.recipes.filter(
             kind=kind,
             category=category,
@@ -1478,6 +1534,31 @@ def create_app():
         shop_on_hand = [r for r in shop_rows if r["bucket"] == "on_hand"]
         shop_check = [r for r in shop_rows if r["bucket"] == "check"]
 
+        # ?added=<n>&since=<timestamp> is set only on the redirect right
+        # after recipe_shop -- the same one-shot query-param pattern as
+        # import_review's ?batch=. `added` isn't trusted directly: it's
+        # clamped to the count of this recipe's shopping-list rows actually
+        # created at/after `since`, so a hand-edited URL (or items removed
+        # again before this render) can't inflate what the notice claims.
+        shop_notice = None
+        added_param = request.args.get("added")
+        since = request.args.get("since")
+        if added_param is not None and since:
+            try:
+                claimed_added = int(added_param)
+            except ValueError:
+                claimed_added = None
+            if claimed_added is not None:
+                source_recipe = _recipe_source_label(recipe)
+                actual_added = sum(
+                    1
+                    for list_item in db.list_shopping_list_items(conn)
+                    if list_item["source_recipe"] == source_recipe
+                    and list_item["created_at"] >= since
+                )
+                shown_added = min(claimed_added, actual_added)
+                shop_notice = _recipe_shop_summary_message(shown_added)
+
         return render_template(
             "recipe_detail.html",
             recipe=recipe,
@@ -1494,6 +1575,7 @@ def create_app():
             shop_fresh_missing=shop_fresh_missing,
             shop_on_hand=shop_on_hand,
             shop_check=shop_check,
+            shop_notice=shop_notice,
             raw_serves_param=request.args.get("serves", ""),
             active="recipes",
         )
@@ -1535,6 +1617,14 @@ def create_app():
         rows = pantry_check.check_ingredients(ingredients, _combined_inventory(conn))
         source_recipe = _recipe_source_label(recipe)
 
+        # Captured before the add loop so recipe_detail's GET side can
+        # re-derive how many rows this specific request actually wrote
+        # (by comparing against created_at) rather than trusting the
+        # ?added= count directly -- the same one-shot-query-param-plus-
+        # DB-reverification convention Task 10's batch_summary uses.
+        started_at = db.now_iso()
+        added_count = 0
+
         for index, row in enumerate(rows):
             if row["bucket"] == "check":
                 selected = request.form.get(f"check-{index}") == "add"
@@ -1557,8 +1647,17 @@ def create_app():
                 amount_note=_ingredient_amount_note(row["ingredient"]),
                 source_recipe=source_recipe,
             )
+            added_count += 1
 
-        return redirect(url_for("recipe_detail", slug=slug, serves=target))
+        return redirect(
+            url_for(
+                "recipe_detail",
+                slug=slug,
+                serves=target,
+                added=added_count,
+                since=started_at,
+            )
+        )
 
     @app.route("/capture", methods=["GET", "POST"])
     @login_required

@@ -44,6 +44,62 @@ def test_increment_button_increases_quantity(client):
     assert _db_items()[0]["quantity"] == 3
 
 
+def test_adjust_with_a_non_numeric_delta_is_a_400_not_a_crash(client):
+    """A crafted/malformed POST (delta isn't a number) must not 500 -- the
+    normal +/- buttons always submit a real number, so this only matters
+    for a hand-crafted request."""
+    _login(client)
+    client.post(
+        "/pantry/add", data={"name": "Rice", "quantity": "2", "unit": "bags", "location": ""}
+    )
+    item_id = _db_items()[0]["id"]
+
+    response = client.post(
+        f"/inventory/{item_id}/adjust", data={"delta": "not-a-number", "storage": "pantry"}
+    )
+
+    assert response.status_code == 400
+    assert _db_items()[0]["quantity"] == 2  # untouched
+
+
+def test_adjust_with_a_missing_delta_is_a_400_not_a_crash(client):
+    _login(client)
+    client.post(
+        "/pantry/add", data={"name": "Rice", "quantity": "2", "unit": "bags", "location": ""}
+    )
+    item_id = _db_items()[0]["id"]
+
+    response = client.post(f"/inventory/{item_id}/adjust", data={"storage": "pantry"})
+
+    assert response.status_code == 400
+    assert _db_items()[0]["quantity"] == 2
+
+
+def test_adjust_on_a_soft_deleted_item_does_not_silently_change_its_quantity(client):
+    """db.adjust_quantity previously updated WHERE id = ? with no deleted_at
+    filter, so an adjust reaching a soft-deleted row (unreachable through
+    the UI, but not impossible via a stale request) would silently apply.
+    It must now no-op instead."""
+    import db
+
+    _login(client)
+    client.post(
+        "/pantry/add", data={"name": "Rice", "quantity": "2", "unit": "bags", "location": ""}
+    )
+    item_id = _db_items()[0]["id"]
+    client.post(f"/inventory/{item_id}/delete")
+
+    response = client.post(f"/inventory/{item_id}/adjust", data={"delta": "5", "storage": "pantry"})
+    assert response.status_code == 302
+
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    try:
+        row = conn.execute("SELECT quantity FROM pantry_items WHERE id = ?", (item_id,)).fetchone()
+    finally:
+        conn.close()
+    assert row["quantity"] == 2  # untouched, not 7
+
+
 def test_delete_removes_item(client):
     _login(client)
     client.post(
