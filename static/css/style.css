@@ -375,6 +375,16 @@ textarea {
   flex-direction: column;
   gap: 0.15rem;
   border-left: 2px solid var(--line);
+  /* .nav is sticky with no bounded height, so an unconstrained catalog
+     list here inflates the whole sidebar and pushes its lower half out
+     of normal scroll reach -- a long list becomes effectively stuck,
+     with nothing to scroll it into view. Give the list itself a scroll
+     region instead, the same "keep an overflowing list in its own
+     scroll area" pattern already used for the recipe engineering table
+     (.cfe-wrap). */
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* ---------- mobile bottom bar ---------- */
