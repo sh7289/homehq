@@ -1138,6 +1138,18 @@ details[open] > .disclosure__summary::after {
   gap: 0.5rem;
 }
 
+/* The Edit menu is a native <details>/<summary> disclosure (see
+   recipe_detail.html) styled to look like the .btn beside it rather than
+   like .disclosure__summary's text-link treatment -- this just strips the
+   default triangle marker so only the .btn styling shows. */
+.edit-menu__summary {
+  list-style: none;
+}
+
+.edit-menu__summary::-webkit-details-marker {
+  display: none;
+}
+
 .recipe-layout {
   display: block;
 }

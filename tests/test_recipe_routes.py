@@ -98,6 +98,33 @@ def test_recipes_page_filters_by_kind(client, app):
     assert "Chicken Tinga Tacos" not in body
 
 
+def test_recipes_page_filters_by_max_effort(client, app):
+    _write_recipe(app, "tinga.md", TINGA)  # effort: 2
+    _write_recipe(app, "scones.md", SCONES)  # effort: 4
+    _login(client)
+
+    body = client.get("/recipes?max_effort=2").data.decode()
+
+    assert "Chicken Tinga Tacos" in body
+    assert "Buttermilk Scones" not in body
+
+
+def test_recipes_page_with_a_non_numeric_max_effort_does_not_500(client, app):
+    """A crafted/stale query string (?max_effort=abc) must be treated as if
+    the filter weren't provided at all, same as it being absent -- not a
+    500."""
+    _write_recipe(app, "tinga.md", TINGA)
+    _write_recipe(app, "scones.md", SCONES)
+    _login(client)
+
+    response = client.get("/recipes?max_effort=abc")
+
+    assert response.status_code == 200
+    body = response.data.decode()
+    assert "Chicken Tinga Tacos" in body
+    assert "Buttermilk Scones" in body
+
+
 def test_recipe_detail_renders_ingredients_and_body(client, app):
     _write_recipe(app, "tinga.md", TINGA)
     _login(client)
@@ -400,7 +427,7 @@ def test_edit_links_are_grouped_in_one_edit_menu(client, app):
     body = client.get("/recipes/stepped").data.decode()
 
     panel = re.search(
-        r'<div class="edit-panel edit-menu__panel" id="edit-menu-panel" hidden>(.*?)</div>',
+        r'<div class="edit-panel edit-menu__panel">(.*?)</div>',
         body,
         re.DOTALL,
     )
@@ -409,6 +436,29 @@ def test_edit_links_are_grouped_in_one_edit_menu(client, app):
     assert "Edit ingredients" in contents
     assert "Edit steps" in contents
     assert "Edit recipe &amp; notes" in contents
+
+
+def test_edit_menu_is_a_native_details_disclosure_reachable_without_js(client, app):
+    """Regression test: Task 4 originally shipped the edit menu as a
+    JS-only hidden-panel toggle with no other entry point to /ingredients,
+    /steps, or /edit -- making recipe editing entirely unreachable with
+    JavaScript disabled. It must be a native <details>/<summary> (like the
+    nav's Catalog disclosure), which needs no JS at all: the whole menu is
+    one self-contained <details>...</details> block with no `hidden`
+    attribute and no dependency on the shared .js-edit-toggle script (that
+    script is still used elsewhere in the app, e.g. inventory/catalog/
+    import, so this only checks the recipe edit menu's own markup)."""
+    _write_recipe(app, "stepped.md", STEPPED)
+    _login(client)
+
+    body = client.get("/recipes/stepped").data.decode()
+
+    menu = re.search(r'<details class="edit-menu">(.*?)</details>', body, re.DOTALL)
+    assert menu, "edit menu is not a native <details>/<summary> disclosure"
+    menu_markup = menu.group(0)
+    assert "hidden" not in menu_markup
+    assert "js-edit-toggle" not in menu_markup
+    assert '<summary class="btn btn--sm btn--ghost edit-menu__summary">Edit</summary>' in menu_markup
 
 
 def test_cook_mode_toggle_and_checkmarks_are_client_side_only(client, app):
@@ -465,6 +515,20 @@ def test_step_editor_prefills_and_saves(client, app):
 
     assert response.status_code == 302
     assert app.recipes.get("stepped").steps[0]["action"] == "brown it"
+
+
+def test_step_advanced_textarea_warns_without_js(client, app):
+    """Finding 3c, steps side: with JS disabled, recipe-editor.js never
+    flips #steps-source to "advanced", so anything typed into the raw-text
+    box is silently discarded on save. A <noscript> warning must be
+    present inside the Advanced disclosure."""
+    _write_recipe(app, "stepped.md", STEPPED)
+    _login(client)
+
+    body = client.get("/recipes/stepped/steps").data.decode()
+
+    assert "<noscript>" in body
+    assert "needs JavaScript to save" in body
 
 
 def test_suggest_steps_does_not_save(client, app, monkeypatch):

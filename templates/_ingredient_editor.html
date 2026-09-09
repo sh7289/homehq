@@ -61,6 +61,17 @@
 
   <details class="disclosure">
     <summary class="disclosure__summary">Advanced: edit as raw text</summary>
+    {# recipe-editor.js is what flips #ingredients-source to "advanced" as
+       soon as this box is typed in -- without it the server always saves
+       the row editor's fields, so anything typed here would be silently
+       discarded on submit. With JS disabled there's no way to make this
+       box authoritative, so warn rather than let that happen quietly. #}
+    <noscript>
+      <p class="notice notice--warning">
+        This box needs JavaScript to save. With JavaScript disabled, anything
+        typed here is ignored -- use the ingredient rows above instead.
+      </p>
+    </noscript>
     <div class="field">
       <label for="ingredients-raw">One ingredient per line</label>
       <textarea id="ingredients-raw" name="ingredients" rows="8"

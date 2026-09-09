@@ -52,6 +52,12 @@
           <div class="row">
             <form class="inline-form" method="post" action="{{ url_for('shopping_list_toggle_purchased', item_id=item.id) }}">
               <input type="checkbox" class="purchase-check" onchange="this.form.submit()" aria-label="Mark {{ item.name }} purchased">
+              {# Real submit control -- with JS off, onchange never fires,
+                 so this is the only way to toggle purchased at all. A
+                 script in base.html hides it once JS confirms it's present
+                 (see .purchase-check-submit there); it still exists in the
+                 markup and works either way. #}
+              <button class="btn btn--sm purchase-check-submit" type="submit">Mark purchased</button>
             </form>
             <div class="row__info">
               <span class="row__name">{{ item.name }}</span>
@@ -92,6 +98,7 @@
               <div class="row">
                 <form class="inline-form" method="post" action="{{ url_for('shopping_list_toggle_purchased', item_id=item.id) }}">
                   <input type="checkbox" class="purchase-check" checked onchange="this.form.submit()" aria-label="Unmark {{ item.name }} purchased">
+                  <button class="btn btn--sm purchase-check-submit" type="submit">Unmark purchased</button>
                 </form>
                 <div class="row__info">
                   <span class="row__name">{{ item.name }}</span>
@@ -134,6 +141,7 @@
               <div class="row">
                 <form class="inline-form" method="post" action="{{ url_for('shopping_list_toggle_purchased', item_id=item.id) }}">
                   <input type="checkbox" class="purchase-check" checked onchange="this.form.submit()" aria-label="Unmark {{ item.name }} purchased">
+                  <button class="btn btn--sm purchase-check-submit" type="submit">Unmark purchased</button>
                 </form>
                 <div class="row__info">
                   <span class="row__name">{{ item.name }}</span>

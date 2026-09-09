@@ -192,6 +192,19 @@
     })();
 
     (function () {
+      // Progressive enhancement for the shopping list's purchased-toggle
+      // checkboxes (shopping_list.html): the checkbox's onchange="this.form.
+      // submit()" is the primary interaction, and its form also ships a
+      // real <button type="submit"> fallback so the toggle still works with
+      // JS disabled. This script only runs when JS *is* enabled, so it's
+      // the right place (not CSS) to hide that fallback button -- it never
+      // needs to reappear, since a page that got this far already has JS.
+      document.querySelectorAll(".purchase-check-submit").forEach(function (btn) {
+        btn.hidden = true;
+      });
+    })();
+
+    (function () {
       // Pending state for forms that trigger an AI extraction call (capture,
       // import upload, recipe paste, import retry): a form opts in with
       // data-pending-message="Reading photos…", and on submit this disables

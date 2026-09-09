@@ -49,10 +49,15 @@
     <div class="recipe-toolbar no-print">
       <button type="button" class="btn btn--sm" id="cook-mode-toggle" aria-pressed="false">Cook mode</button>
 
-      <div class="edit-menu">
-        <button type="button" class="btn btn--sm btn--ghost js-edit-toggle" data-target="edit-menu-panel"
-                aria-controls="edit-menu-panel" aria-expanded="false">Edit</button>
-        <div class="edit-panel edit-menu__panel" id="edit-menu-panel" hidden>
+      {# Native <details>/<summary> disclosure -- same pattern as Task 1's
+         nav (see base.html) -- rather than the JS-only hidden-panel
+         toggle used elsewhere (inventory edit, catalog delete, import
+         review): those routes have no other entry point, so without this
+         being reachable with JS disabled, recipe editing would be
+         unreachable entirely. #}
+      <details class="edit-menu">
+        <summary class="btn btn--sm btn--ghost edit-menu__summary">Edit</summary>
+        <div class="edit-panel edit-menu__panel">
           <a class="btn btn--sm" href="{{ url_for('recipe_ingredients', slug=recipe.slug) }}">
             {% if recipe.ingredients %}Edit ingredients{% else %}Add ingredients{% endif %}
           </a>
@@ -63,7 +68,7 @@
           {% endif %}
           <a class="btn btn--sm" href="{{ url_for('recipe_edit', slug=recipe.slug) }}">Edit recipe &amp; notes</a>
         </div>
-      </div>
+      </details>
     </div>
 
     {# A direct child of the card (not of .recipe-layout__ingredients) so
@@ -163,6 +168,9 @@
     {% if ingredients %}
       <section class="recipe-shop no-print" id="shop">
         <span class="eyebrow">Add to shopping list</span>
+        {% if shop_notice %}
+          <p class="notice notice--success" aria-live="polite" role="status">{{ shop_notice }}</p>
+        {% endif %}
         <form method="post" action="{{ url_for('recipe_shop', slug=recipe.slug) }}"
               data-pending-message="Adding to list&hellip;">
           <input type="hidden" name="serves" value="{{ raw_serves_param }}">
