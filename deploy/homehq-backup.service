@@ -11,6 +11,9 @@ WorkingDirectory=/home/homehq/homehq
 # 0600 file so it is not in the env file you cat while debugging the app.
 EnvironmentFile=/home/homehq/.homehq.env
 EnvironmentFile=/home/homehq/.homehq-backup.env
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
 ExecStart=/home/homehq/homehq/.venv/bin/python scripts/backup.py
 
 [Install]

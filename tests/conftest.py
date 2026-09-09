@@ -31,4 +31,17 @@ def app(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(app):
-    return app.test_client()
+    client = app.test_client()
+    original_post = client.post
+
+    def post_with_login_csrf(path, *args, **kwargs):
+        if path.split('?')[0] == '/login' and 'data' in kwargs:
+            client.get('/login')
+            with client.session_transaction() as state:
+                token = state['csrf_token']
+            kwargs['data'] = dict(kwargs['data'])
+            kwargs['data'].setdefault('csrf_token', token)
+        return original_post(path, *args, **kwargs)
+
+    client.post = post_with_login_csrf
+    return client

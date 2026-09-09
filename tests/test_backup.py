@@ -135,3 +135,100 @@ def test_prune_keeps_newest_backups(tmp_path):
         "pantry-2026-09-04T000000Z.db.gpg",
         "pantry-2026-09-05T000000Z.db.gpg",
     ]
+
+
+def test_missing_source_does_not_create_an_empty_database(tmp_path):
+    source = tmp_path / "missing.db"
+    with pytest.raises(ValueError, match="source"):
+        backup.create_backup(str(source), str(tmp_path / "backups"),
+                             "secret", runner=_FakeGPG())
+    assert not source.exists()
+
+
+def test_snapshot_and_ciphertext_have_private_permissions(tmp_path):
+    import stat
+    source = tmp_path / "finance.db"
+    _make_db(str(source)).close()
+    fake = _FakeGPG()
+
+    def inspect_permissions(cmd, **kwargs):
+        assert stat.S_IMODE(os.stat(cmd[-1]).st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(os.path.dirname(cmd[-1])).st_mode) == 0o700
+        return fake(cmd, **kwargs)
+
+    path = backup.create_backup(str(source), str(tmp_path / "backups"),
+                                "secret", runner=inspect_permissions)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+
+
+def test_snapshot_failure_leaves_no_plaintext(tmp_path, monkeypatch):
+    source = tmp_path / "finance.db"
+    _make_db(str(source)).close()
+    dest = tmp_path / "backups"
+
+    def interrupted(source, target):
+        with open(target, "wb") as f:
+            f.write(b"private account balance")
+        raise OSError("disk error")
+
+    monkeypatch.setattr(backup, "_snapshot", interrupted)
+    with pytest.raises(OSError):
+        backup.create_backup(str(source), str(dest), "secret", runner=_FakeGPG())
+    assert list(dest.iterdir()) == []
+
+
+def test_retention_is_per_database_and_leaves_unrelated_files(tmp_path):
+    for stem in ("finance", "pantry"):
+        for day in range(1, 5):
+            (tmp_path / f"{stem}-2026-09-0{day}T000000Z.db.gpg").write_bytes(b"cipher")
+    (tmp_path / "personal-document.gpg").write_bytes(b"unrelated")
+    backup.prune_backups(str(tmp_path), keep=2)
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "finance-2026-09-03T000000Z.db.gpg", "finance-2026-09-04T000000Z.db.gpg",
+        "pantry-2026-09-03T000000Z.db.gpg", "pantry-2026-09-04T000000Z.db.gpg",
+        "personal-document.gpg",
+    ]
+
+
+def test_cli_backs_up_both_configured_databases(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    source = tmp_path / "pantry.db"
+    finance = tmp_path / "finance.db"
+    _make_db(str(source)).close()
+    _make_db(str(finance)).close()
+    dest = tmp_path / "backups"
+    monkeypatch.setenv("HOMEHQ_DB_PATH", str(source))
+    monkeypatch.setenv("HOMEHQ_FINANCE_DB_PATH", str(finance))
+    monkeypatch.setenv("HOMEHQ_BACKUP_DIR", str(dest))
+    monkeypatch.setenv("HOMEHQ_BACKUP_PASSPHRASE", "secret")
+    original = backup.create_backup
+    def encrypt_without_external_gpg(*args, **kwargs):
+        return original(*args, **kwargs, runner=_FakeGPG(),
+                        now=datetime(2026, 9, 7, tzinfo=timezone.utc))
+    monkeypatch.setattr(backup, "create_backup", encrypt_without_external_gpg)
+    assert backup.main([]) == 0
+    assert sorted(p.name for p in dest.iterdir()) == [
+        "finance-2026-09-07T000000Z.db.gpg", "pantry-2026-09-07T000000Z.db.gpg",
+    ]
+
+
+@pytest.mark.parametrize('kind', ['public', 'symlink', 'file'])
+def test_backup_rejects_unsafe_existing_destination(tmp_path, kind):
+    source = tmp_path / 'source.db'
+    conn = _make_db(str(source))
+    conn.close()
+    dest = tmp_path / 'backups'
+    if kind == 'file':
+        dest.write_text('keep')
+    elif kind == 'symlink':
+        target = tmp_path / 'target'
+        target.mkdir(mode=0o700)
+        dest.symlink_to(target, target_is_directory=True)
+    else:
+        dest.mkdir(mode=0o755)
+        dest.chmod(0o755)
+    runner = _FakeGPG()
+    with pytest.raises(ValueError, match='destination'):
+        backup.create_backup(str(source), str(dest), 'secret', runner=runner)
+    assert runner.calls == []
+    assert not list(tmp_path.rglob('*.gpg'))

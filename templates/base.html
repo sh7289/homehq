@@ -13,10 +13,13 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#ece4d3">
 
+  {% block fonts %}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  {% endblock %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% block extra_head %}{% endblock %}
 </head>
 <body>
   {% if current_user.is_authenticated %}
@@ -47,6 +50,12 @@
         <a href="{{ url_for('add_chooser') }}"
            class="nav__top-link {{ 'is-active' if active == 'add' else '' }}"
            {% if active == 'add' %}aria-current="page"{% endif %}>Add</a>
+
+        {% if config.FINANCE_ENABLED %}
+          <a href="{{ url_for('finance') }}"
+             class="nav__top-link {{ 'is-active' if active == 'finance' else '' }}"
+             {% if active == 'finance' %}aria-current="page"{% endif %}>Finance</a>
+        {% endif %}
 
         <div class="nav__group">
           <p class="nav__heading">Food</p>
@@ -104,6 +113,12 @@
         <a href="{{ url_for('shopping_list') }}"
            class="nav-mobile__item {{ 'is-active' if active == 'shopping-list' else '' }}"
            {% if active == 'shopping-list' %}aria-current="page"{% endif %}>Shopping</a>
+
+        {% if config.FINANCE_ENABLED %}
+          <a href="{{ url_for('finance') }}"
+             class="nav-mobile__item {{ 'is-active' if active == 'finance' else '' }}"
+             {% if active == 'finance' %}aria-current="page"{% endif %}>Finance</a>
+        {% endif %}
 
         {% set more_active = active in ['add', 'capture', 'import', 'report'] or active in nav_categories %}
         <details class="nav-mobile__disclosure" {% if more_active %}open{% endif %}>

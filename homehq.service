@@ -8,6 +8,10 @@ User=homehq
 Group=homehq
 WorkingDirectory=/home/homehq/homehq
 EnvironmentFile=/home/homehq/.homehq.env
+# MFA secrets are separate from the main configuration and provider credential.
+EnvironmentFile=-/home/homehq/.homehq-mfa-user1.env
+EnvironmentFile=-/home/homehq/.homehq-mfa-user2.env
+UMask=0077
 ExecStart=/home/homehq/homehq/.venv/bin/gunicorn --workers 1 --threads 4 --bind 127.0.0.1:8502 "app:create_app()"
 Restart=always
 RestartSec=5s
