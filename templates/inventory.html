@@ -1,198 +1,251 @@
 {% extends "base.html" %}
+{% from "_error_summary.html" import error_summary, field_message, field_attrs %}
 {% block title %}{{ storage|capitalize }} – Home HQ{% endblock %}
 {% block content %}
   <div class="card">
     <div class="top-actions">
       <h1 class="card__title">{{ storage|capitalize }}</h1>
-      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
+      <span>
+        <a class="btn btn--primary btn--sm" href="{{ url_for('add_groceries') }}">Add by typing or photo</a>
+      </span>
     </div>
     <hr class="card__rule">
     <p class="card__meta">Logged in as {{ user }} &middot; {{ items|length }} item{{ '' if items|length == 1 else 's' }}</p>
 
-    {% if expired or expiring_soon %}
-      <div class="alerts">
-        {% if expired %}
-          <div>
-            <p class="alerts__group-label">Needs attention — expired</p>
-            <ul>
-              {% for item in expired %}
-                <li class="stamp">Expired &middot; {{ item.name }} &middot; {{ item.effective_expiry }}{% if item.effective_expiry_estimated %} (est.){% endif %}</li>
-              {% endfor %}
-            </ul>
-          </div>
-        {% endif %}
-        {% if expiring_soon %}
-          <div>
-            <p class="alerts__group-label">Expiring within 30 days</p>
-            <ul>
-              {% for item in expiring_soon %}
-                <li class="tag-soon">{{ item.name }} &middot; {{ item.effective_expiry }}{% if item.effective_expiry_estimated %} (est.){% endif %}</li>
-              {% endfor %}
-            </ul>
-          </div>
-        {% endif %}
+    {% if undo_id %}
+      <div class="notice notice--success notice--action" aria-live="polite" role="status">
+        <span>Removed &ldquo;{{ undo_name or 'that item' }}&rdquo;.</span>
+        <form class="inline-form" method="post" action="{{ url_for('inventory_restore', item_id=undo_id) }}">
+          <input type="hidden" name="storage" value="{{ storage }}">
+          <input type="hidden" name="q" value="{{ query }}">
+          <input type="hidden" name="filter" value="{{ active_filter }}">
+          <button class="btn btn--sm" type="submit">Undo</button>
+        </form>
       </div>
     {% endif %}
 
     <form class="search-bar" method="get" action="{{ url_for(storage) }}">
-      <input type="search" name="q" value="{{ query }}" placeholder="Search {{ storage }}&hellip;">
+      <label class="visually-hidden" for="q">Search {{ storage }}</label>
+      <input id="q" type="search" name="q" value="{{ query }}" placeholder="Search {{ storage }}&hellip;">
+      {% if active_filter != 'all' %}<input type="hidden" name="filter" value="{{ active_filter }}">{% endif %}
       <button class="btn" type="submit">Search</button>
     </form>
 
-    {% for group in groups %}
-    <span class="eyebrow">{{ group.label }} &middot; {{ group.rows|length }}</span>
-    <ul class="rows">
-      {% for item in group.rows %}
-        <li class="row-item">
-          <div class="row">
-            <span class="row__name">{{ item.name }}</span>
-            <span class="row__meta">{{ item.quantity }} {{ item.unit }}{% if item.location %} &middot; {{ item.location }}{% endif %}</span>
-            {% if item.effective_expiry %}
-              <span class="row__expiry {{ 'row__expiry--expired' if item.expiry_status == 'expired' else ('row__expiry--soon' if item.expiry_status == 'expiring_soon' else '') }}">
-                {{ item.effective_expiry }}{% if item.effective_expiry_estimated %} (est.){% endif %}
-              </span>
-            {% endif %}
-            <span class="row__actions">
-              <form class="inline-form" method="post" action="{{ url_for('inventory_adjust', item_id=item.id) }}">
-                <input type="hidden" name="storage" value="{{ storage }}">
-                <input type="hidden" name="delta" value="-1">
-                <button class="btn btn--sm" type="submit" aria-label="Decrease {{ item.name }}">&minus;</button>
-              </form>
-              <form class="inline-form" method="post" action="{{ url_for('inventory_adjust', item_id=item.id) }}">
-                <input type="hidden" name="storage" value="{{ storage }}">
-                <input type="hidden" name="delta" value="1">
-                <button class="btn btn--sm" type="submit" aria-label="Increase {{ item.name }}">&plus;</button>
-              </form>
-              <button class="btn btn--sm js-edit-toggle" type="button" data-target="edit-{{ item.id }}">Edit</button>
-            </span>
-          </div>
-          <div class="edit-panel" id="edit-{{ item.id }}" hidden>
-            <form method="post" action="{{ url_for('inventory_update', item_id=item.id) }}">
-              <input type="hidden" name="storage" value="{{ storage }}">
-              <div class="form-row">
-                <div class="field">
-                  <label for="quantity-{{ item.id }}">Quantity</label>
-                  <input id="quantity-{{ item.id }}" type="number" step="any" name="quantity" value="{{ item.quantity }}" required>
-                </div>
-                <div class="field">
-                  <label for="unit-{{ item.id }}">Unit</label>
-                  <input id="unit-{{ item.id }}" type="text" name="unit" value="{{ item.unit or '' }}">
-                </div>
-                <div class="field">
-                  <label for="location-{{ item.id }}">Location</label>
-                  <input id="location-{{ item.id }}" type="text" name="location" value="{{ item.location or '' }}">
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="field">
-                  <label for="expiry-{{ item.id }}">Expiry date</label>
-                  <input id="expiry-{{ item.id }}" type="date" name="expiry_date" value="{{ item.expiry_date or '' }}">
-                </div>
-                <div class="field">
-                  <label for="acquired-{{ item.id }}">Acquired date</label>
-                  <input id="acquired-{{ item.id }}" type="date" name="acquired_date" value="{{ item.acquired_date or '' }}">
-                </div>
-                <div class="field">
-                  <label for="shelf-life-{{ item.id }}">Shelf life override (days)</label>
-                  <input id="shelf-life-{{ item.id }}" type="number" min="1" name="shelf_life_days" value="{{ item.shelf_life_days or '' }}" placeholder="{{ '1095 default' if storage == 'pantry' else '365 default' }}">
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="field">
-                  <label for="section-edit-{{ item.id }}">Section</label>
-                  <select id="section-edit-{{ item.id }}" name="section">
-                    {% for key, label in all_sections %}
-                      <option value="{{ key }}" {{ 'selected' if item.section == key else '' }}>{{ label }}</option>
-                    {% endfor %}
-                  </select>
-                </div>
-              </div>
-              <div class="edit-panel__actions">
-                <button class="btn btn--primary btn--sm" type="submit">Save</button>
-                <button class="btn btn--ghost btn--sm js-edit-toggle" type="button" data-target="edit-{{ item.id }}">Cancel</button>
-              </div>
-            </form>
-            <form class="inline-form" method="post" action="{{ url_for('inventory_delete', item_id=item.id) }}">
-              <input type="hidden" name="storage" value="{{ storage }}">
-              <button class="btn btn--sm btn--ghost" type="submit">Delete item</button>
-            </form>
-          </div>
-        </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <ul class="rows">
-      <li class="row">Nothing logged in the {{ storage }} yet — add the first item below.</li>
-    </ul>
-    {% endfor %}
-
-    {% if unsectioned and not query %}
-      <span class="eyebrow">Sort into sections &middot; {{ unsectioned|length }} of {{ unsectioned_total }} unsorted</span>
-      <form class="section-sorter" method="post" action="{{ url_for('inventory_assign_sections') }}">
-        <input type="hidden" name="storage" value="{{ storage }}">
-        <ul class="rows">
-          {% for item in unsectioned %}
-            <li class="row">
-              <span class="row__name">{{ item.name }}</span>
-              <span class="row__meta">{{ item.quantity }} {{ item.unit }}</span>
-              <select name="section-{{ item.id }}" aria-label="Section for {{ item.name }}">
-                <option value="">&mdash;</option>
-                {% for key, label in all_sections %}
-                  <option value="{{ key }}">{{ label }}</option>
-                {% endfor %}
-              </select>
-            </li>
-          {% endfor %}
-        </ul>
-        <button class="btn btn--primary" type="submit">Save sections</button>
-      </form>
-    {% endif %}
-
     <span class="eyebrow">Add item</span>
     <form method="post" action="{{ url_for(storage + '_add') }}">
+      <input type="hidden" name="q" value="{{ query }}">
+      <input type="hidden" name="filter" value="{{ active_filter }}">
+      {{ error_summary(add_errors) }}
       <div class="form-row">
         <div class="field">
           <label for="name">Name</label>
-          <input id="name" type="text" name="name" required>
+          <input id="name" type="text" name="name" value="{{ add_values.get('name', '') }}" required {{ field_attrs(add_errors_by_field, 'name') }}>
+          {{ field_message(add_errors_by_field, 'name') }}
         </div>
         <div class="field">
           <label for="quantity">Quantity</label>
-          <input id="quantity" type="number" step="any" name="quantity" required>
+          <input id="quantity" type="number" step="any" name="quantity" value="{{ add_values.get('quantity', '') }}" required {{ field_attrs(add_errors_by_field, 'quantity') }}>
+          {{ field_message(add_errors_by_field, 'quantity') }}
         </div>
         <div class="field">
           <label for="unit">Unit</label>
-          <input id="unit" type="text" name="unit">
+          <input id="unit" type="text" name="unit" value="{{ add_values.get('unit', '') }}">
         </div>
-      </div>
-      <div class="form-row">
         <div class="field">
           <label for="section">Section</label>
           <select id="section" name="section">
             {% for key, label in all_sections %}
-              <option value="{{ key }}">{{ label }}</option>
+              <option value="{{ key }}" {{ 'selected' if add_values.get('section') == key else '' }}>{{ label }}</option>
             {% endfor %}
           </select>
         </div>
-        <div class="field">
-          <label for="location">Location</label>
-          <input id="location" type="text" name="location">
-        </div>
-        <div class="field">
-          <label for="expiry_date">Expiry date</label>
-          <input id="expiry_date" type="date" name="expiry_date">
-        </div>
       </div>
-      <div class="form-row">
-        <div class="field">
-          <label for="acquired_date">Acquired date</label>
-          <input id="acquired_date" type="date" name="acquired_date">
+      <details class="disclosure" {{ 'open' if add_errors else '' }}>
+        <summary class="disclosure__summary">More details</summary>
+        <div class="form-row">
+          <div class="field">
+            <label for="location">Location</label>
+            <input id="location" type="text" name="location" value="{{ add_values.get('location', '') }}">
+          </div>
+          <div class="field">
+            <label for="expiry_date">Expiry date</label>
+            <input id="expiry_date" type="date" name="expiry_date" value="{{ add_values.get('expiry_date', '') }}">
+          </div>
+          <div class="field">
+            <label for="acquired_date">Acquired date</label>
+            <input id="acquired_date" type="date" name="acquired_date" value="{{ add_values.get('acquired_date', '') }}">
+          </div>
+          <div class="field">
+            <label for="shelf_life_days">Shelf life override (days)</label>
+            <input id="shelf_life_days" type="number" min="1" name="shelf_life_days" value="{{ add_values.get('shelf_life_days', '') }}" placeholder="{{ '1095 default' if storage == 'pantry' else '365 default' }}" {{ field_attrs(add_errors_by_field, 'shelf_life_days') }}>
+            {{ field_message(add_errors_by_field, 'shelf_life_days') }}
+          </div>
         </div>
-        <div class="field">
-          <label for="shelf_life_days">Shelf life override (days)</label>
-          <input id="shelf_life_days" type="number" min="1" name="shelf_life_days" placeholder="{{ '1095 default' if storage == 'pantry' else '365 default' }}">
-        </div>
-      </div>
+      </details>
       <button class="btn btn--primary" type="submit">Add to {{ storage }}</button>
     </form>
+
+    <span class="eyebrow">Show</span>
+    <div class="filter-bar" role="group" aria-label="Filter {{ storage }}">
+      <a class="btn btn--sm {{ 'btn--primary' if active_filter == 'all' else 'btn--ghost' }}"
+         {% if active_filter == 'all' %}aria-current="true"{% endif %}
+         href="{{ url_for(storage, q=(query if query else none)) }}">All &middot; {{ items|length }}</a>
+      <a class="btn btn--sm {{ 'btn--primary' if active_filter == 'expired' else 'btn--ghost' }}"
+         {% if active_filter == 'expired' %}aria-current="true"{% endif %}
+         href="{{ url_for(storage, q=(query if query else none), filter='expired') }}">Past date &middot; {{ expired_count }}</a>
+      <a class="btn btn--sm {{ 'btn--primary' if active_filter == 'expiring_soon' else 'btn--ghost' }}"
+         {% if active_filter == 'expiring_soon' %}aria-current="true"{% endif %}
+         href="{{ url_for(storage, q=(query if query else none), filter='expiring_soon') }}">Due soon &middot; {{ expiring_soon_count }}</a>
+      <a class="btn btn--sm {{ 'btn--primary' if active_filter == 'unsorted' else 'btn--ghost' }}"
+         {% if active_filter == 'unsorted' %}aria-current="true"{% endif %}
+         href="{{ url_for(storage, q=(query if query else none), filter='unsorted') }}">Unsorted &middot; {{ unsectioned_total }}</a>
+    </div>
+
+    {% if groups %}
+      {% for group in groups %}
+      <details class="section-group" open>
+        <summary class="disclosure__summary">{{ group.label }} &middot; {{ group.rows|length }}</summary>
+        <ul class="rows">
+          {% for item in group.rows %}
+            {% set is_erroring = edit_error.get('item_id') == item.id %}
+            {% set ev = edit_values if is_erroring else item %}
+            <li class="row-item" id="row-{{ item.id }}">
+              <div class="row">
+                <div class="row__info">
+                  <span class="row__name">{{ item.name }}</span>
+                  <span class="row__meta">{{ item.quantity }} {{ item.unit }}{% if item.location %} &middot; {{ item.location }}{% endif %}</span>
+                  {% if item.effective_expiry %}
+                    <span class="row__expiry {{ 'row__expiry--expired' if item.expiry_status == 'expired' else ('row__expiry--soon' if item.expiry_status == 'expiring_soon' else '') }}">
+                      {{ item.effective_expiry }}{% if item.effective_expiry_estimated %} (est.){% endif %}
+                    </span>
+                  {% endif %}
+                </div>
+                <span class="row__actions">
+                  <form class="inline-form" method="post" action="{{ url_for('inventory_adjust', item_id=item.id) }}">
+                    <input type="hidden" name="storage" value="{{ storage }}">
+                    <input type="hidden" name="q" value="{{ query }}">
+                    <input type="hidden" name="filter" value="{{ active_filter }}">
+                    <input type="hidden" name="delta" value="-1">
+                    <button class="btn btn--sm" type="submit" aria-label="Decrease {{ item.name }}">&minus;</button>
+                  </form>
+                  <form class="inline-form" method="post" action="{{ url_for('inventory_adjust', item_id=item.id) }}">
+                    <input type="hidden" name="storage" value="{{ storage }}">
+                    <input type="hidden" name="q" value="{{ query }}">
+                    <input type="hidden" name="filter" value="{{ active_filter }}">
+                    <input type="hidden" name="delta" value="1">
+                    <button class="btn btn--sm" type="submit" aria-label="Increase {{ item.name }}">&plus;</button>
+                  </form>
+                  <button class="btn btn--sm js-edit-toggle" type="button" data-target="edit-{{ item.id }}">Edit</button>
+                </span>
+              </div>
+              <div class="edit-panel" id="edit-{{ item.id }}" {{ '' if is_erroring else 'hidden' }}>
+                {% if is_erroring %}{{ error_summary(edit_error.get('errors'), heading="Please fix the following before saving:") }}{% endif %}
+                <form method="post" action="{{ url_for('inventory_update', item_id=item.id) }}">
+                  <input type="hidden" name="storage" value="{{ storage }}">
+                  <input type="hidden" name="q" value="{{ query }}">
+                  <input type="hidden" name="filter" value="{{ active_filter }}">
+                  <div class="form-row">
+                    <div class="field">
+                      <label for="quantity-{{ item.id }}">Quantity</label>
+                      <input id="quantity-{{ item.id }}" type="number" step="any" name="quantity" value="{{ ev.get('quantity', '') }}" required {{ field_attrs(edit_errors_by_field, 'quantity-' ~ item.id) }}>
+                      {{ field_message(edit_errors_by_field, 'quantity-' ~ item.id) }}
+                    </div>
+                    <div class="field">
+                      <label for="unit-{{ item.id }}">Unit</label>
+                      <input id="unit-{{ item.id }}" type="text" name="unit" value="{{ ev.get('unit') or '' }}">
+                    </div>
+                    <div class="field">
+                      <label for="location-{{ item.id }}">Location</label>
+                      <input id="location-{{ item.id }}" type="text" name="location" value="{{ ev.get('location') or '' }}">
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="field">
+                      <label for="expiry-{{ item.id }}">Expiry date</label>
+                      <input id="expiry-{{ item.id }}" type="date" name="expiry_date" value="{{ ev.get('expiry_date') or '' }}">
+                    </div>
+                    <div class="field">
+                      <label for="acquired-{{ item.id }}">Acquired date</label>
+                      <input id="acquired-{{ item.id }}" type="date" name="acquired_date" value="{{ ev.get('acquired_date') or '' }}">
+                    </div>
+                    <div class="field">
+                      <label for="shelf-life-{{ item.id }}">Shelf life override (days)</label>
+                      <input id="shelf-life-{{ item.id }}" type="number" min="1" name="shelf_life_days" value="{{ ev.get('shelf_life_days') or '' }}" placeholder="{{ '1095 default' if storage == 'pantry' else '365 default' }}" {{ field_attrs(edit_errors_by_field, 'shelf-life-' ~ item.id) }}>
+                      {{ field_message(edit_errors_by_field, 'shelf-life-' ~ item.id) }}
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="field">
+                      <label for="section-edit-{{ item.id }}">Section</label>
+                      <select id="section-edit-{{ item.id }}" name="section">
+                        {% for key, label in all_sections %}
+                          <option value="{{ key }}" {{ 'selected' if ev.get('section') == key else '' }}>{{ label }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                  </div>
+                  <div class="edit-panel__actions">
+                    <button class="btn btn--primary btn--sm" type="submit">Save</button>
+                    <button class="btn btn--ghost btn--sm js-edit-toggle" type="button" data-target="edit-{{ item.id }}">Cancel</button>
+                  </div>
+                </form>
+                <form class="inline-form" method="post" action="{{ url_for('inventory_delete', item_id=item.id) }}">
+                  <input type="hidden" name="storage" value="{{ storage }}">
+                  <input type="hidden" name="q" value="{{ query }}">
+                  <input type="hidden" name="filter" value="{{ active_filter }}">
+                  <button class="btn btn--sm btn--ghost" type="submit">Delete item</button>
+                </form>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endfor %}
+    {% elif is_storage_empty %}
+      <ul class="rows">
+        <li class="row">Nothing logged in the {{ storage }} yet — add the first item above.</li>
+      </ul>
+    {% else %}
+      <ul class="rows">
+        <li class="row">
+          <span>
+            {% if query and active_filter != 'all' %}
+              No items match your search and filter.
+            {% elif query %}
+              No items match your search.
+            {% else %}
+              No items match this filter.
+            {% endif %}
+          </span>
+          <a class="btn btn--sm btn--ghost" href="{{ url_for(storage) }}">Clear filters</a>
+        </li>
+      </ul>
+    {% endif %}
+
+    {% if unsectioned_total %}
+      <details class="section-group">
+        <summary class="disclosure__summary">Sort into sections &middot; {{ unsectioned|length }} of {{ unsectioned_total }} unsorted</summary>
+        <form class="section-sorter" method="post" action="{{ url_for('inventory_assign_sections') }}">
+          <input type="hidden" name="storage" value="{{ storage }}">
+          <input type="hidden" name="q" value="{{ query }}">
+          <input type="hidden" name="filter" value="{{ active_filter }}">
+          <ul class="rows">
+            {% for item in unsectioned %}
+              <li class="row">
+                <span class="row__name">{{ item.name }}</span>
+                <span class="row__meta">{{ item.quantity }} {{ item.unit }}</span>
+                <select name="section-{{ item.id }}" aria-label="Section for {{ item.name }}">
+                  <option value="">&mdash;</option>
+                  {% for key, label in all_sections %}
+                    <option value="{{ key }}">{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </li>
+            {% endfor %}
+          </ul>
+          <button class="btn btn--primary" type="submit">Save sections</button>
+        </form>
+      </details>
+    {% endif %}
   </div>
 {% endblock %}

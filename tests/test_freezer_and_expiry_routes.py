@@ -65,7 +65,7 @@ def test_update_item_edits_full_record_and_redirects_to_originating_page(client)
     )
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/freezer")
+    assert response.headers["Location"].endswith(f"/freezer#row-{item_id}")
     item = _db_items(storage="freezer")[0]
     assert item["quantity"] == 3
     assert item["unit"] == "bags"

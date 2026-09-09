@@ -1,11 +1,9 @@
 {% extends "base.html" %}
+{% from "_ingredient_editor.html" import ingredient_editor %}
 {% block title %}Add a recipe – Home HQ{% endblock %}
 {% block content %}
   <div class="card">
-    <div class="top-actions">
-      <h1 class="card__title">Add a Recipe</h1>
-      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
-    </div>
+    <h1 class="card__title">Add a Recipe</h1>
     <hr class="card__rule">
 
     {% if error %}
@@ -58,10 +56,8 @@
       </div>
 
       <div class="field">
-        <label for="ingredients">Ingredients</label>
-        <textarea id="ingredients" name="ingredients" rows="7"
-                  placeholder="chicken thighs | 1.5 | lb | fresh&#10;chipotle chili powder | 2 | tsp | staple&#10;corn tortillas | 12 | count">{{ form.ingredients or '' }}</textarea>
-        <span class="field__help">{{ ingredient_help }}</span>
+        <span class="eyebrow">Ingredients</span>
+        {{ ingredient_editor(ingredients, ingredient_lines, ingredient_help) }}
       </div>
 
       <div class="field">
@@ -71,11 +67,7 @@
 
       <button class="btn btn--primary" type="submit">Save recipe</button>
     </form>
-
-    <span class="eyebrow">Why the flags matter</span>
-    <ul class="rows">
-      <li class="row"><strong>fresh</strong> — produce, dairy, fresh meat. Always added to the shopping list, because the pantry doesn't track fresh goods and "we have it" isn't the same as "it's still good".</li>
-      <li class="row"><strong>staple</strong> — spices and cupboard basics you always have. Keeps meal plans from asking about cumin every time.</li>
-    </ul>
   </div>
+
+  <script src="{{ url_for('static', filename='js/recipe-editor.js') }}"></script>
 {% endblock %}

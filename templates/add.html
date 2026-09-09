@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Add – Home HQ{% endblock %}
+{% block content %}
+  <div class="card">
+    <h1 class="card__title">Add</h1>
+    <hr class="card__rule">
+    <p class="card__meta">
+      What are you adding? Pick the closest match and it'll take you straight
+      to the right way to enter it.
+    </p>
+
+    <div class="index-grid index-section">
+      <a href="{{ url_for('add_groceries') }}">
+        <span class="index-grid__label">Type it in, or a photo &middot; stages for review</span>
+        <span class="index-grid__name">Groceries</span>
+      </a>
+      <a href="{{ url_for('recipes') }}">
+        <span class="index-grid__label">Paste text, or fill in a form</span>
+        <span class="index-grid__name">Recipe</span>
+      </a>
+      <a href="{{ url_for('import_upload') }}">
+        <span class="index-grid__label">Photo &middot; stages for review</span>
+        <span class="index-grid__name">Household item</span>
+      </a>
+    </div>
+
+    <span class="eyebrow">What each one does</span>
+    <ul class="rows">
+      <li class="row">Groceries — nothing lands in the pantry or freezer until you review what was found.</li>
+      <li class="row">Recipe — pasting opens a prefilled form to check before saving; typing by hand opens a blank one.</li>
+      <li class="row">Household item — for things worth cataloguing (appliances, furniture, valuables). Nothing is added until you review it.</li>
+    </ul>
+  </div>
+{% endblock %}

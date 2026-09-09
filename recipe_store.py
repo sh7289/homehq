@@ -46,7 +46,13 @@ class RecipeStore:
         )
 
     def filter(
-        self, kind=None, cuisine=None, category=None, max_effort=None, favorites_only=False
+        self,
+        kind=None,
+        cuisine=None,
+        category=None,
+        max_effort=None,
+        favorites_only=False,
+        q=None,
     ):
         results = self.all()
         if kind:
@@ -61,7 +67,20 @@ class RecipeStore:
             results = [r for r in results if r.effort is None or r.effort <= max_effort]
         if favorites_only:
             results = [r for r in results if r.is_favorite]
+        if q:
+            needle = q.strip().lower()
+            if needle:
+                results = [r for r in results if self._matches(r, needle)]
         return results
+
+    @staticmethod
+    def _matches(recipe, needle):
+        """Case-insensitive substring match against the name or any
+        ingredient's name -- the two things a person searching for
+        "what can I make with chicken" would type."""
+        if needle in recipe.name.lower():
+            return True
+        return any(needle in (ing.get("name") or "").lower() for ing in recipe.ingredients)
 
     def group_by_kind(self):
         """[{kind, recipes}] in alphabetical kind order, non-empty only."""

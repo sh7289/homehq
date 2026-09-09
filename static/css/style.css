@@ -1,13 +1,11 @@
 /* ============================================================
    Home HQ — "the household ledger"
-   A card-catalog drawer: a dark walnut frame holding a lifted
-   cream index card. Folder-tab navigation, a red ledger rule
-   under titles, rubber-stamped EXPIRED marks on expired goods.
+   A lifted cream index card on a light neutral page. Folder-tab
+   navigation, a red ledger rule under titles, rubber-stamped
+   EXPIRED marks on expired goods.
    ============================================================ */
 
 :root {
-  --drawer: #3b342c;
-  --drawer-deep: #2f2921;
   --paper: #f7f1e1;
   --paper-dim: #efe6cc;
   --ink: #2b2420;
@@ -16,9 +14,13 @@
   --teal-dark: #204d44;
   --rust: #a6402b;
   --amber: #c98a2c;
+  /* Darkened variant of --amber for text -- the raw --amber is ~2.4-2.6:1
+     against cream, well under WCAG's 4.5:1 minimum for text. --amber stays
+     as-is for borders/backgrounds (restrained accent use, not text), this
+     is the one to reach for whenever amber is a foreground color. */
+  --amber-text: #7a5310;
   --sage: #7c8a5e;
   --line: rgba(43, 36, 32, 0.16);
-  --line-on-drawer: rgba(247, 241, 225, 0.16);
 
   --font-display: "Special Elite", "Courier New", monospace;
   --font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -26,6 +28,56 @@
 
   --radius: 7px;
   --radius-sm: 4px;
+
+  /* ---- shared design-system tokens ----
+     Spacing / typography / surface / focus / status. Later pages in this
+     app should reach for these rather than hand-rolled values. */
+
+  /* spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* typography scale (font-family/case rules live on the elements that use
+     them -- this is just sizing) */
+  --text-xs: 0.75rem;
+  --text-sm: 0.85rem;
+  --text-base: 1rem;
+  --text-lg: 1.15rem;
+  --text-xl: 1.5rem;
+
+  /* surfaces */
+  --surface-page: #ece4d3;
+  --surface-card: var(--paper);
+  --surface-card-alt: var(--paper-dim);
+  --surface-border: var(--line);
+  --surface-ink: var(--ink);
+  --surface-ink-soft: var(--ink-soft);
+
+  /* focus */
+  --focus-ring-color: var(--teal);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* status -- pair a border/background-safe accent with a text-safe,
+     4.5:1-checked variant. Reach for the *-text one for foreground text. */
+  --status-success: var(--teal);
+  --status-success-text: var(--teal-dark);
+  --status-warning: var(--amber);
+  --status-warning-text: var(--amber-text);
+  --status-danger: var(--rust);
+  --status-danger-text: var(--rust);
+
+  /* layout */
+  --shell-max-width: 1100px;
+  --prose-max-width: 70ch;
+  --nav-rail-width: 220px;
+  --nav-mobile-height: 4.5rem;
+  --touch-target: 44px;
 }
 
 * {
@@ -50,30 +102,48 @@
 }
 
 html {
-  color-scheme: dark;
+  /* Surfaces are light throughout -- native controls (checkboxes, date
+     pickers, etc.) should render with light-theme chrome to match, not the
+     dark-theme chrome `dark` was forcing on them. */
+  color-scheme: light;
+  /* A fixed mobile nav bar covers the bottom of the viewport; without this
+     the browser can scroll a focused field to right underneath it. */
+  scroll-padding-bottom: calc(var(--nav-mobile-height) + env(safe-area-inset-bottom) + 1rem);
+  /* Belt-and-braces: nothing here should ever cause page-level horizontal
+     scroll. `clip` (not `hidden`) so this doesn't make html/body a scroll
+     container -- `hidden` on only one axis computes the other to `auto`
+     per spec, which would quietly break the sticky nav rail below. */
+  overflow-x: clip;
+}
+
+@media (min-width: 860px) {
+  html {
+    scroll-padding-bottom: 0;
+  }
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--drawer);
+  background: var(--surface-page);
   background-image: radial-gradient(
       ellipse at top,
-      rgba(255, 255, 255, 0.04),
+      rgba(255, 255, 255, 0.5),
       transparent 60%
     ),
     repeating-linear-gradient(
       90deg,
-      rgba(0, 0, 0, 0.06) 0px,
-      rgba(0, 0, 0, 0.06) 1px,
+      rgba(43, 36, 32, 0.035) 0px,
+      rgba(43, 36, 32, 0.035) 1px,
       transparent 1px,
       transparent 64px
     );
-  color: var(--paper);
+  color: var(--ink);
   font-family: var(--font-body);
   font-size: 16px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
 }
 
 a {
@@ -93,13 +163,63 @@ textarea {
   font-size: 1rem; /* keep >=16px: prevents iOS Safari zooming in on focus */
 }
 
+/* Visually hidden but still announced by assistive tech and reachable by
+   keyboard -- for labels that would be redundant on-screen (a placeholder
+   already shows the same text) but are still needed as the input's
+   accessible name. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---------- shell ---------- */
 
 .shell {
-  max-width: 780px;
+  max-width: var(--shell-max-width);
   margin: 0 auto;
-  padding: calc(2rem + env(safe-area-inset-top)) calc(1.25rem + env(safe-area-inset-right))
-    4rem calc(1.25rem + env(safe-area-inset-left));
+  padding: calc(1.5rem + env(safe-area-inset-top)) calc(1.25rem + env(safe-area-inset-right))
+    2.5rem calc(1.25rem + env(safe-area-inset-left));
+}
+
+/* First focusable element in the authenticated shell -- invisible until it
+   receives keyboard focus, so a keyboard/screen-reader user can jump past
+   the nav straight to page content. */
+.skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 100;
+  transform: translateY(-150%);
+  transition: transform 0.15s ease;
+  background: var(--surface-card);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  text-decoration: none;
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 14px -6px rgba(43, 36, 32, 0.35);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.4rem;
 }
 
 .wordmark {
@@ -107,14 +227,13 @@ textarea {
   align-items: baseline;
   gap: 0.6rem;
   text-decoration: none;
-  margin-bottom: 1.1rem;
 }
 
 .wordmark__title {
   font-family: var(--font-display);
   font-size: 1.35rem;
   letter-spacing: 0.02em;
-  color: var(--paper);
+  color: var(--ink);
 }
 
 .wordmark__tag {
@@ -122,80 +241,304 @@ textarea {
   font-size: 0.68rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--paper-dim);
-  opacity: 0.55;
+  /* Full-opacity --ink-soft against --surface-page computes to ~4.84:1.
+     The 0.75 opacity this used to carry blended it down to ~3:1 against
+     the new light page background -- dropped rather than re-tuned, since
+     --ink-soft alone already clears 4.5:1 with no extra math needed. */
+  color: var(--ink-soft);
 }
 
-/* ---------- folder-tab nav ---------- */
-
-.tabs-wrap {
-  position: relative;
-}
-
-.tabs-wrap::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 2rem;
-  background: linear-gradient(to right, transparent, var(--drawer));
-  pointer-events: none;
-}
-
-.tabs {
+.account {
   display: flex;
-  gap: 0.3rem;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.account__name {
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* ---------- primary navigation ---------- */
+/* Two parallel <nav> regions -- a rail for desktop, a bottom bar for
+   mobile -- toggled with display, never both visible/in the a11y tree at
+   once. Grouped destinations (Catalog on desktop, Inventory/More on
+   mobile) use native <details>/<summary> so the disclosure is keyboard and
+   screen-reader operable without any JS. */
+
+.nav {
+  display: none;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+
+.nav__top-link {
+  display: flex;
+  align-items: center;
+  min-height: var(--touch-target);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+}
+
+.nav__top-link:hover {
+  background: var(--surface-card-alt);
+}
+
+.nav__top-link.is-active {
+  background: var(--status-success);
+  color: var(--paper);
+}
+
+.nav__heading {
+  margin: 0 0 0.35rem;
+  padding: 0 0.75rem;
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+}
+
+.nav__list {
   list-style: none;
   margin: 0;
   padding: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
 }
 
-.tabs::-webkit-scrollbar {
+.nav__link,
+.nav__summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: var(--touch-target);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  cursor: pointer;
+  list-style: none;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.nav__summary::-webkit-details-marker {
   display: none;
 }
 
-.tabs a {
-  display: inline-block;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  text-decoration: none;
-  color: var(--paper-dim);
-  background: var(--drawer-deep);
-  border: 1px solid var(--line-on-drawer);
-  border-bottom: none;
-  border-radius: 5px 5px 0 0;
-  padding: 0.5rem 0.85rem 0.6rem;
-  transform: translateY(2px);
-  transition: transform 0.12s ease, color 0.12s ease, background 0.12s ease;
+.nav__summary {
+  justify-content: space-between;
 }
 
-.tabs a:hover {
+.nav__summary::after {
+  content: "\203A"; /* › */
+  color: var(--ink-soft);
+  transition: transform 0.12s ease;
+}
+
+.nav__disclosure[open] > .nav__summary::after {
+  transform: rotate(90deg);
+}
+
+.nav__link:hover,
+.nav__summary:hover {
+  background: var(--surface-card-alt);
+}
+
+.nav__link.is-active {
+  background: var(--status-success);
   color: var(--paper);
-  transform: translateY(0);
+  font-weight: 600;
 }
 
-.tabs a.is-active {
-  color: var(--ink);
-  background: var(--paper);
-  border-color: var(--paper);
-  transform: translateY(0);
+/* The Catalog group heading itself isn't a page, so it gets a lighter
+   "something in here is active" treatment rather than the full fill. */
+.nav__summary.is-active {
+  color: var(--status-success-text);
   font-weight: 600;
+}
+
+.nav__sublist {
+  list-style: none;
+  margin: 0.15rem 0 0.25rem;
+  padding-left: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  border-left: 2px solid var(--line);
+}
+
+/* ---------- mobile bottom bar ---------- */
+
+.nav-mobile {
+  display: flex;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  gap: 0.1rem;
+  background: var(--surface-card);
+  border-top: 1px solid var(--line);
+  padding: 0.3rem calc(0.3rem + env(safe-area-inset-right))
+    calc(0.3rem + env(safe-area-inset-bottom)) calc(0.3rem + env(safe-area-inset-left));
+}
+
+.nav-mobile__item,
+.nav-mobile__summary {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  min-height: var(--touch-target);
+  padding: 0.3rem 0.15rem;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--ink-soft);
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  text-align: center;
+  cursor: pointer;
+  list-style: none;
+}
+
+.nav-mobile__summary::-webkit-details-marker {
+  display: none;
+}
+
+.nav-mobile__item:hover,
+.nav-mobile__summary:hover {
+  background: var(--surface-card-alt);
+}
+
+.nav-mobile__item.is-active,
+.nav-mobile__summary.is-active {
+  color: var(--status-success-text);
+  font-weight: 600;
+}
+
+.nav-mobile__disclosure {
+  position: relative;
+  flex: 1 1 0;
+}
+
+.nav-mobile__panel {
+  position: absolute;
+  bottom: calc(100% + 0.5rem);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  min-width: 10rem;
+  max-width: calc(100vw - 1.5rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  background: var(--surface-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem;
+  box-shadow: 0 -10px 24px -14px rgba(43, 36, 32, 0.35);
+}
+
+/* "More" is the rightmost of the 5 bottom-bar slots -- centering its
+   popover the same way the others do runs it off the right edge of the
+   viewport at phone widths (with overflow-x:clip on body, that overflow
+   is invisible AND unreachable, not just visually clipped). Anchor it to
+   the disclosure's right edge instead, so it only ever grows leftward. */
+.nav-mobile__panel--more {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.nav-mobile__panel a {
+  display: flex;
+  align-items: center;
+  min-height: var(--touch-target);
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.nav-mobile__panel a:hover {
+  background: var(--surface-card-alt);
+}
+
+.nav-mobile__panel a.is-active {
+  background: var(--surface-card-alt);
+  color: var(--status-success-text);
+  font-weight: 600;
+}
+
+.nav-mobile__panel-heading {
+  margin: 0.3rem 0 0.1rem;
+  padding: 0 0.6rem;
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.main {
+  min-width: 0;
+  padding-bottom: calc(var(--nav-mobile-height) + env(safe-area-inset-bottom) + 1.5rem);
+}
+
+@media (min-width: 860px) {
+  .shell {
+    display: grid;
+    grid-template-columns: minmax(180px, var(--nav-rail-width)) minmax(0, 1fr);
+    grid-template-areas: "topbar topbar" "nav main";
+    column-gap: 2.5rem;
+    row-gap: 0.5rem;
+    align-items: start;
+  }
+
+  .topbar {
+    grid-area: topbar;
+    margin-bottom: 1.8rem;
+  }
+
+  .nav {
+    display: flex;
+    grid-area: nav;
+    position: sticky;
+    top: 1.5rem;
+  }
+
+  .nav-mobile {
+    display: none;
+  }
+
+  .main {
+    grid-area: main;
+    padding-bottom: 3rem;
+  }
 }
 
 /* ---------- the card ---------- */
 
 .card {
-  background: var(--paper);
+  background: var(--surface-card);
   color: var(--ink);
   border-radius: 0 var(--radius) var(--radius) var(--radius);
   padding: 1.8rem 1.9rem 2.1rem;
-  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.55), 0 2px 0 rgba(0, 0, 0, 0.25);
+  box-shadow: 0 10px 26px -16px rgba(43, 36, 32, 0.28), 0 1px 0 rgba(43, 36, 32, 0.05);
 }
 
 .card--narrow {
@@ -203,11 +546,19 @@ textarea {
   margin: 3rem auto 0;
 }
 
+/* Recipe prose (ingredients, method, notes) reads best narrower than the
+   wide shell now allows for list/dashboard pages -- cap it like a printed
+   column even though the rail beside it can stretch out. */
+.card--prose {
+  max-width: var(--prose-max-width);
+}
+
 .card__title {
   font-family: var(--font-display);
   font-size: 1.5rem;
   margin: 0 0 0.15rem;
   color: var(--ink);
+  overflow-wrap: anywhere;
 }
 
 .card__rule {
@@ -219,18 +570,17 @@ textarea {
 }
 
 .card__meta {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  letter-spacing: 0.06em;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
   color: var(--ink-soft);
   margin: -0.9rem 0 1.4rem;
 }
 
 .eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--ink-soft);
   display: block;
   margin-bottom: 0.3rem;
@@ -307,10 +657,9 @@ textarea {
 }
 
 .field label {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 600;
   color: var(--ink-soft);
 }
 
@@ -328,9 +677,10 @@ textarea {
 .field select:focus,
 .field textarea:focus,
 a:focus-visible,
-button:focus-visible {
-  outline: 2px solid var(--teal);
-  outline-offset: 2px;
+button:focus-visible,
+summary:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .field input:focus,
@@ -369,18 +719,120 @@ button:focus-visible {
   margin-bottom: 1.1rem;
 }
 
+/* A form's live pending/progress message (see base.html) -- reserves its
+   line height even empty, so the button row doesn't jump when text appears. */
+.status-live {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  margin: 0.6rem 0 0;
+  min-height: 1.2em;
+}
+
+/* Same live region, sized for a status-live sitting inside a flex .row
+   (e.g. the Retry status in import_review.html's "Needs attention" list)
+   rather than under a standalone form: forced onto its own line via
+   flex-basis, and with no reserved height, so an empty one adds nothing to
+   a list of several rows -- it only takes space while a message is set. */
+.status-live--inline {
+  flex-basis: 100%;
+  min-height: 0;
+  margin: 0.3rem 0 0;
+}
+
+/* Same shape as .form-error, using the success/warning status tokens --
+   for outcomes that aren't failures (or aren't only failures). */
+.notice {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 1.1rem;
+  border: 1px solid;
+}
+
+.notice--success {
+  color: var(--status-success-text);
+  background: rgba(47, 110, 98, 0.08);
+  border-color: var(--status-success);
+}
+
+.notice--warning {
+  color: var(--status-warning-text);
+  background: rgba(201, 138, 44, 0.08);
+  border-color: var(--status-warning);
+}
+
+/* A .notice with an action alongside its message (e.g. the Undo button after
+   an inventory/shopping-list delete -- see inventory.html/shopping_list.html). */
+.notice--action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* Accessible error summary (shared _error_summary.html partial): a
+   role="alert" landmark listing every field-linked validation error.
+   Same shape as .form-error, since it's the same "something's wrong"
+   affordance, just with links out to each field. base.html moves keyboard
+   focus here right after a failed submit (see its focus-summary script). */
+.error-summary {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--rust);
+  background: rgba(166, 64, 43, 0.08);
+  border: 1px solid rgba(166, 64, 43, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 1.1rem;
+}
+
+.error-summary:focus {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.error-summary__heading {
+  font-weight: 600;
+  margin: 0 0 0.3rem;
+}
+
+.error-summary__list {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.error-summary__list a {
+  color: var(--rust);
+}
+
+/* Inline per-field message, rendered next to the field it describes -- in
+   addition to (not instead of) the summary above. */
+.field-error {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--rust);
+  margin: 0.2rem 0 0;
+}
+
 /* ---------- buttons ---------- */
 
 .btn {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: var(--touch-target);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 600;
   border: 1px solid var(--ink);
   background: transparent;
   color: var(--ink);
   border-radius: var(--radius-sm);
-  padding: 0.5rem 0.9rem;
+  padding: 0.5rem 1rem;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, transform 0.06s ease;
 }
@@ -392,6 +844,14 @@ button:focus-visible {
 
 .btn:active {
   transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  /* Also suppresses :hover's color-swap while disabled, since a disabled
+     button can still register :hover from the mouse sitting on it. */
+  pointer-events: none;
 }
 
 .btn--primary {
@@ -418,10 +878,10 @@ button:focus-visible {
 }
 
 .btn--sm {
-  padding: 0.5rem 0.7rem;
-  font-size: 0.68rem;
-  min-height: 2.25rem;
-  min-width: 2.25rem;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.8rem;
+  min-height: var(--touch-target);
+  min-width: var(--touch-target);
 }
 
 .inline-form {
@@ -467,60 +927,65 @@ button:focus-visible {
   color: var(--ink);
 }
 
-/* ---------- expiry alerts ---------- */
+/* ---------- inventory filter bar ---------- */
+/* Replaces the old always-visible expired/expiring-soon alert lists: a row
+   of summary toggles (All/Past date/Due soon/Unsorted) above the rows,
+   reusing .btn rather than inventing new control styling. */
 
-.alerts {
-  margin-bottom: 1.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-}
-
-.alerts__group-label {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-  margin: 0 0 0.4rem;
-}
-
-.alerts ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.filter-bar {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  margin-bottom: 1.5rem;
 }
 
-.stamp {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-family: var(--font-display);
-  font-size: 0.78rem;
-  letter-spacing: 0.04em;
-  color: var(--rust);
-  border: 2px double var(--rust);
-  border-radius: 3px;
-  padding: 0.3rem 0.6rem;
-  transform: rotate(-2deg);
-  background: rgba(166, 64, 43, 0.06);
+/* ---------- disclosures ---------- */
+/* Shared by the add-item form's "More details", each collapsible section
+   group, and the bulk section-sorter -- native <details>/<summary>, styled
+   like .eyebrow but interactive, matching Task 1's nav disclosure pattern. */
+
+.disclosure {
+  margin: 0.2rem 0 1.1rem;
 }
 
-.tag-soon {
-  display: inline-flex;
+.disclosure__summary {
+  display: flex;
   align-items: center;
-  gap: 0.4rem;
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  color: var(--amber);
-  border: 1px solid var(--amber);
-  border-radius: 999px;
-  padding: 0.25rem 0.65rem;
-  background: rgba(201, 138, 44, 0.08);
+  gap: 0.35rem;
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-soft);
+  padding: 0.5rem 0;
+  min-height: var(--touch-target);
+}
+
+.disclosure__summary::-webkit-details-marker {
+  display: none;
+}
+
+.disclosure__summary::after {
+  content: "\203A"; /* › */
+  color: var(--ink-soft);
+  transition: transform 0.12s ease;
+}
+
+details[open] > .disclosure__summary::after {
+  transform: rotate(90deg);
+}
+
+.section-group {
+  margin: 0;
+}
+
+* + .section-group {
+  margin-top: 1.5rem;
+}
+
+.section-group .rows {
+  margin-top: 0.3rem;
 }
 
 /* ---------- recipes ---------- */
@@ -548,8 +1013,8 @@ button:focus-visible {
 }
 
 .tag-untried {
-  color: var(--amber);
-  border: 1px dashed var(--amber);
+  color: var(--status-warning-text);
+  border: 1px dashed var(--status-warning);
   background: transparent;
 }
 
@@ -595,6 +1060,234 @@ button:focus-visible {
 
 .recipe-body__para:last-child {
   margin-bottom: 0;
+}
+
+/* ---------- recipe detail: stats, side-by-side layout, cook mode ---------- */
+/* Task 4: pull servings/effort/time out of the run-on meta line into their
+   own visually distinct row; the rest of the frontmatter (category, protein,
+   season, leftovers, freezer_friendly, garden_herbs, cuisine, favorite,
+   source) is secondary and lives in the "More about this recipe" disclosure
+   below it -- same native <details>/<summary> pattern as .disclosure
+   elsewhere, just re-labelled here for this page's own copy. */
+
+.card--recipe {
+  max-width: var(--prose-max-width);
+}
+
+@media (min-width: 860px) {
+  /* Wider than the shared prose cap so ingredients and method have room to
+     sit side by side (see .recipe-layout below) without either column
+     feeling squeezed. */
+  .card--recipe {
+    max-width: 880px;
+  }
+}
+
+.recipe-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.4rem;
+  margin: 0 0 0.2rem;
+}
+
+.recipe-stat__value {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  color: var(--ink);
+}
+
+.recipe-meta-more {
+  margin-bottom: 0.4rem;
+}
+
+.recipe-meta-more .card__meta {
+  margin: 0.3rem 0 0;
+}
+
+/* Mobile-only jump nav -- the desktop grid below puts ingredients and
+   method side by side, so there's nothing to jump to there. */
+.jump-nav {
+  display: flex;
+  gap: 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 0 0 1.1rem;
+}
+
+.recipe-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.6rem 0.8rem;
+  margin: 0 0 1.5rem;
+}
+
+.edit-menu {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.edit-menu__panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* The Edit menu is a native <details>/<summary> disclosure (see
+   recipe_detail.html) styled to look like the .btn beside it rather than
+   like .disclosure__summary's text-link treatment -- this just strips the
+   default triangle marker so only the .btn styling shows. */
+.edit-menu__summary {
+  list-style: none;
+}
+
+.edit-menu__summary::-webkit-details-marker {
+  display: none;
+}
+
+.recipe-layout {
+  display: block;
+}
+
+@media (min-width: 860px) {
+  .jump-nav {
+    display: none;
+  }
+
+  .recipe-layout {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(0, 1.6fr);
+    gap: 0 2.2rem;
+    align-items: start;
+  }
+}
+
+/* ---------- cook mode ---------- */
+/* A plain `.is-cooking` class toggled on #recipe-root by recipe-cook.js.
+   Ingredient/step checkmarks are native checkboxes already in the markup
+   (hidden here, revealed once cooking) -- checking one off is pure CSS
+   (`.cook-check:checked + label`), no JS involved in the checkmark itself,
+   and nothing here is ever submitted to the server. */
+
+.cook-check {
+  display: none;
+}
+
+.is-cooking .cook-check {
+  display: inline-block;
+  width: 1.2rem;
+  height: 1.2rem;
+  margin: 0 0.6rem 0 0;
+  vertical-align: middle;
+  accent-color: var(--teal);
+}
+
+.cook-check:checked + label {
+  text-decoration: line-through;
+  color: var(--ink-soft);
+}
+
+.is-cooking .method {
+  font-size: 1.2rem;
+  line-height: 1.7;
+}
+
+.is-cooking .method li {
+  margin-bottom: 1rem;
+}
+
+/* Persistent servings control while cooking: the scale-bar sticks to the
+   top of the viewport instead of scrolling away with the ingredients. */
+.is-cooking .scale-bar {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 3;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.6rem;
+}
+
+/* ---------- recipe row editors (ingredients/steps) ---------- */
+
+.editor-rows {
+  margin: 0 0 0.6rem;
+}
+
+.editor-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper-dim);
+  padding: 0.8rem 0.9rem 0.6rem;
+  margin-bottom: 0.7rem;
+}
+
+.editor-row .form-row {
+  margin-bottom: 0.2rem;
+}
+
+.editor-row .field {
+  margin-bottom: 0.6rem;
+}
+
+.editor-row__number {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 0 0 0.5rem;
+}
+
+.editor-row__flags {
+  display: flex;
+  gap: 1.2rem;
+  margin: 0 0 0.7rem;
+}
+
+.editor-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0.3rem 0 0.6rem;
+}
+
+/* Qualified with .picker rather than a bare .picker__option: these sit
+   inside a .field (for the "Uses" field group), and `.field label` (one
+   class plus a type selector, so higher specificity than a single class)
+   would otherwise win and force every option into the field-label look
+   (bold, ink-soft, uppercase-adjacent) meant for actual field labels like
+   "Name"/"Amount". */
+.picker .picker__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.picker .picker__option--orphan {
+  color: var(--rust);
+}
+
+.picker__empty {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  margin: 0.3rem 0 0.6rem;
 }
 
 /* Cooking For Engineers table: ingredients down the left, operations
@@ -700,8 +1393,8 @@ button:focus-visible {
 }
 
 .field__help {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
   line-height: 1.45;
   color: var(--ink-soft);
 }
@@ -741,14 +1434,39 @@ button:focus-visible {
   border-color: var(--teal);
 }
 
+/* Shopping list: a large, persisted "purchased" checkbox -- submits its
+   one-field form on change (see base.html has no JS for this; the
+   onchange="this.form.submit()" inline handler is the entire progressive
+   enhancement here, same spirit as the plain POST buttons everywhere else
+   on this row). Checking/unchecking never does more than flip the stored
+   flag server-side. */
+.purchase-check {
+  width: 1.4rem;
+  height: 1.4rem;
+  flex: 0 0 auto;
+  accent-color: var(--teal);
+  cursor: pointer;
+}
+
+/* Name/quantity/expiry stacked as one column, so every row lines up the
+   same way regardless of how long its name or meta text is -- actions sit
+   in a second column pushed to the far right by .row__actions's
+   margin-left: auto. */
+.row__info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .row__name {
   font-weight: 600;
-  margin-right: 0.15rem;
 }
 
 .row__meta {
-  font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
   color: var(--ink-soft);
 }
 
@@ -762,7 +1480,7 @@ button:focus-visible {
 }
 
 .row__expiry--soon {
-  color: var(--amber);
+  color: var(--status-warning-text);
 }
 
 .row__actions {
@@ -770,6 +1488,14 @@ button:focus-visible {
   align-items: center;
   gap: 0.35rem;
   margin-left: auto;
+}
+
+/* .row__info/.row__actions are shared classes, but this shrink-guard only
+   matters for inventory's two-column row (name/meta/expiry vs. buttons) --
+   scoped to inventory's `.section-group` wrapper so it doesn't change
+   wrapping on shopping list / import review / other pages' `.row` rows. */
+.section-group .row__actions {
+  flex-shrink: 0;
 }
 
 /* ---------- row edit panel ---------- */
@@ -804,6 +1530,57 @@ button:focus-visible {
   margin-top: 0.3rem;
 }
 
+/* ---------- import review: group rows by source photo ----------
+   Mobile-first: the photo (or the no-photo label) sits above its group's
+   rows, matching the plan's "mobile: source preview above that image's
+   rows" requirement. At the desktop breakpoint used elsewhere on this page
+   (860px, see .row/.section-group above) the photo moves beside the rows
+   instead, so correcting an amount never requires scrolling away from the
+   image it was read from. */
+.import-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+
+.import-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.import-group__photo {
+  align-self: flex-start;
+}
+
+.import-group__photo .photo-frame img {
+  width: 100%;
+  max-width: 220px;
+  height: auto;
+  max-height: 220px;
+}
+
+.import-group__nophoto-label {
+  margin: 0;
+}
+
+.import-group__rows {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+@media (min-width: 860px) {
+  .import-group--photo {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .import-group--photo .import-group__photo {
+    flex: 0 0 220px;
+  }
+}
+
 /* ---------- catalog detail ---------- */
 
 .spec-list {
@@ -814,10 +1591,9 @@ button:focus-visible {
 }
 
 .spec-list dt {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 600;
   color: var(--ink-soft);
 }
 
@@ -915,12 +1691,15 @@ button:focus-visible {
   }
 
   .shell {
+    display: block; /* undo the desktop nav-rail grid -- no empty column left behind */
     max-width: none;
     padding: 0;
   }
 
-  .wordmark,
-  .tabs-wrap,
+  .topbar,
+  .nav,
+  .nav-mobile,
+  .skip-link,
   .no-print {
     display: none;
   }
@@ -933,13 +1712,44 @@ button:focus-visible {
     box-shadow: none;
     border-radius: 0;
   }
+
+  /* Recipe printing (Task 4): ingredients and method, nothing else. The
+     side-by-side desktop grid and Cook mode's enlarged type are both
+     screen-only conveniences -- print always falls back to one plain
+     column, and .no-print (already applied above to the jump nav, toolbar,
+     scale-bar and every cook-check) strips the rest of the page's chrome
+     regardless of whether Cook mode happened to be on when this was
+     printed. */
+  .card--recipe {
+    max-width: none;
+  }
+
+  .recipe-layout {
+    display: block;
+  }
+
+  .is-cooking .method {
+    font-size: inherit;
+    line-height: inherit;
+  }
+
+  /* .cook-check already carries .no-print, but the screen-side reveal rule
+     (.is-cooking .cook-check { display: inline-block }, two classes) beats
+     the plain .no-print { display: none } rule above (one class) on
+     specificity -- so if Cook mode is on when the page is printed, the
+     checkbox stays visible. Match its specificity here, inside @media
+     print, so this wins by both specificity and source order. */
+  .is-cooking .cook-check {
+    display: none;
+  }
 }
 
 /* ---------- responsive ---------- */
 
 @media (max-width: 560px) {
   .shell {
-    padding: 1.25rem 0.85rem 3rem;
+    padding: calc(1.25rem + env(safe-area-inset-top)) calc(0.85rem + env(safe-area-inset-right))
+      1.5rem calc(0.85rem + env(safe-area-inset-left));
   }
 
   .card {
@@ -949,5 +1759,24 @@ button:focus-visible {
   .row__actions {
     margin-left: 0;
     width: 100%;
+  }
+
+  /* Compact stacked rows on inventory pages only: the name/quantity/expiry
+     column on its own line, actions below it right-aligned -- rather than
+     the desktop's two-column layout squeezed down, which left action
+     buttons wrapping unpredictably next to whichever bit of text happened
+     to run long. Scoped to `.section-group` (inventory-only) so shopping
+     list / import review / other `.row` usages elsewhere are unaffected. */
+  .section-group .row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .section-group .row__info {
+    width: 100%;
+  }
+
+  .section-group .row__actions {
+    justify-content: flex-end;
   }
 }

@@ -14,12 +14,13 @@
       at a time.
     </p>
 
-    <form method="post" action="{{ url_for('import_upload') }}" enctype="multipart/form-data">
+    <form method="post" action="{{ url_for('import_upload') }}" enctype="multipart/form-data" data-pending-message="Reading photos&hellip;">
       <div class="field">
         <label for="photo">Photos</label>
         <input id="photo" type="file" name="photo" accept="image/*" multiple required>
       </div>
       <button class="btn btn--primary" type="submit">Upload &amp; extract</button>
     </form>
+    <p class="status-live" aria-live="polite" role="status"></p>
   </div>
 {% endblock %}

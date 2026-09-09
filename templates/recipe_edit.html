@@ -2,10 +2,7 @@
 {% block title %}Edit {{ recipe.name }} – Home HQ{% endblock %}
 {% block content %}
   <div class="card">
-    <div class="top-actions">
-      <h1 class="card__title">Edit {{ recipe.name }}</h1>
-      <form method="post" action="{{ url_for('logout') }}"><button class="btn btn--ghost" type="submit">Log out</button></form>
-    </div>
+    <h1 class="card__title">Edit {{ recipe.name }}</h1>
     <hr class="card__rule">
     <p class="card__meta">
       Ingredients and steps are edited on their own screens and are left

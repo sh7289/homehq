@@ -35,6 +35,12 @@ def init_db(conn):
         # Nullable on purpose: existing backfilled rows stay untouched and
         # render under "Other" until they're sorted.
         conn.execute("ALTER TABLE pantry_items ADD COLUMN section TEXT")
+    if "deleted_at" not in existing_columns:
+        # Soft-delete marker: NULL means live. Deleting sets a timestamp
+        # instead of running a hard DELETE, so a delete can be undone by
+        # clearing it back to NULL (see restore_item). Every read query
+        # against pantry_items must filter `deleted_at IS NULL`.
+        conn.execute("ALTER TABLE pantry_items ADD COLUMN deleted_at TEXT")
 
     conn.execute(
         """
@@ -47,6 +53,40 @@ def init_db(conn):
         )
         """
     )
+    shopping_list_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(shopping_list_items)")
+    }
+    if "deleted_at" not in shopping_list_columns:
+        # Same soft-delete marker as pantry_items -- see the comment there.
+        conn.execute("ALTER TABLE shopping_list_items ADD COLUMN deleted_at TEXT")
+    if "purchased" not in shopping_list_columns:
+        # Persisted checkbox state. Checking/unchecking only ever flips this
+        # flag (see set_shopping_list_item_purchased) -- it is deliberately
+        # separate from reconciled_at below, so "I bought this" and "this is
+        # reflected in inventory" are two different, independently-toggle-
+        # able/idempotent facts about the row.
+        conn.execute(
+            "ALTER TABLE shopping_list_items ADD COLUMN purchased INTEGER NOT NULL DEFAULT 0"
+        )
+    if "reconciled_at" not in shopping_list_columns:
+        # Idempotency guard for Finish shopping: NULL means "not yet
+        # reconciled into inventory (or completed, for a fresh/untracked
+        # item)". claim_shopping_list_item_for_finish flips this from NULL
+        # to a timestamp with a single atomic UPDATE ... WHERE reconciled_at
+        # IS NULL, so a repeat Finish-shopping submission for the same item
+        # can never apply its inventory write twice.
+        conn.execute("ALTER TABLE shopping_list_items ADD COLUMN reconciled_at TEXT")
+    if "amount_note" not in shopping_list_columns:
+        # Optional textual amount ("a bag", "a couple") alongside the
+        # existing numeric quantity_to_buy, for groceries with no clean
+        # number.
+        conn.execute("ALTER TABLE shopping_list_items ADD COLUMN amount_note TEXT")
+    if "source_recipe" not in shopping_list_columns:
+        # Nullable label of the recipe this item came from, when known.
+        # Nothing populates this yet (a later task wires up recipe ->
+        # shopping); this task only needs the column to exist and render
+        # correctly, including showing nothing when it's null.
+        conn.execute("ALTER TABLE shopping_list_items ADD COLUMN source_recipe TEXT")
 
     conn.execute(
         """
@@ -77,6 +117,17 @@ def init_db(conn):
         conn.execute("ALTER TABLE import_staging_items ADD COLUMN estimated_value TEXT")
     if "section" not in staging_columns:
         conn.execute("ALTER TABLE import_staging_items ADD COLUMN section TEXT")
+    # batch_id ties every row (staged or failed) produced by one upload
+    # request together, so the review page can report "N ready; M failed"
+    # for *this* upload rather than for every pending/failed row ever.
+    # error/media_type only apply to status='failed' rows: the message from
+    # the failed extraction, and the media type needed to retry it.
+    if "batch_id" not in staging_columns:
+        conn.execute("ALTER TABLE import_staging_items ADD COLUMN batch_id TEXT")
+    if "error" not in staging_columns:
+        conn.execute("ALTER TABLE import_staging_items ADD COLUMN error TEXT")
+    if "media_type" not in staging_columns:
+        conn.execute("ALTER TABLE import_staging_items ADD COLUMN media_type TEXT")
 
     conn.execute(
         """
@@ -101,6 +152,15 @@ LOCKOUT_MAX_SECONDS = 15 * 60
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def now_iso():
+    """Public wrapper around _now() for callers outside this module (e.g.
+    app.py's recipe_shop) that need a timestamp in the exact format stored
+    in a row's created_at column, so they can later re-derive "what got
+    written by this request" by comparing against created_at rather than
+    trusting a query-string count directly."""
+    return _now()
 
 
 def record_login_failure(conn, identifier, now=None):
@@ -182,21 +242,49 @@ def add_item(
 
 def list_items(conn, storage=None):
     if storage is None:
-        rows = conn.execute("SELECT * FROM pantry_items ORDER BY name").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM pantry_items WHERE deleted_at IS NULL ORDER BY name"
+        ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM pantry_items WHERE storage = ? ORDER BY name", (storage,)
+            "SELECT * FROM pantry_items WHERE storage = ? AND deleted_at IS NULL "
+            "ORDER BY name",
+            (storage,),
         ).fetchall()
     return [dict(row) for row in rows]
 
 
+def get_item(conn, item_id):
+    """Fetch one *live* pantry row by id -- like list_items, this excludes a
+    soft-deleted row (returns None for one), which matters because callers
+    use it to decide whether to go ahead with a mutation (e.g. a future
+    caller checking a row is still live before acting on it), not only to
+    read display data. The inventory_delete route calls this before the
+    row becomes soft-deleted, so it still sees it; nothing needs to see a
+    soft-deleted row through this function -- the restore routes restore by
+    id directly, with no lookup first.
+    """
+    row = conn.execute(
+        "SELECT * FROM pantry_items WHERE id = ? AND deleted_at IS NULL", (item_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def adjust_quantity(conn, item_id, delta):
+    """Adjust a live pantry row's quantity by delta (floored at 0).
+
+    Returns True if a live (not soft-deleted) row was actually updated,
+    False if item_id doesn't exist or is soft-deleted -- callers must check
+    this rather than assuming the write landed, since a soft-deleted or
+    missing id otherwise silently no-ops.
+    """
     with conn:
-        conn.execute(
+        cursor = conn.execute(
             "UPDATE pantry_items SET quantity = MAX(0, quantity + ?), updated_at = ? "
-            "WHERE id = ?",
+            "WHERE id = ? AND deleted_at IS NULL",
             (delta, _now(), item_id),
         )
+        return cursor.rowcount > 0
 
 
 def update_item(
@@ -238,35 +326,126 @@ def set_section(conn, item_id, section):
 
 
 def delete_item(conn, item_id):
+    """Soft-delete: mark the row deleted_at rather than removing it, so a
+    subsequent restore_item can undo this exact delete."""
     with conn:
-        conn.execute("DELETE FROM pantry_items WHERE id = ?", (item_id,))
+        conn.execute(
+            "UPDATE pantry_items SET deleted_at = ? WHERE id = ?", (_now(), item_id)
+        )
 
 
-def add_shopping_list_item(conn, name, storage="pantry", quantity_to_buy=None):
+def restore_item(conn, item_id):
+    """Undo a soft-delete by clearing deleted_at back to NULL.
+
+    Idempotent by construction: this is always an UPDATE on the same row,
+    never a re-INSERT, so calling it again on an already-restored (or
+    never-deleted) row just re-sets deleted_at to NULL a second time -- no
+    duplicate row is ever created.
+    """
+    with conn:
+        conn.execute("UPDATE pantry_items SET deleted_at = NULL WHERE id = ?", (item_id,))
+
+
+def add_shopping_list_item(
+    conn,
+    name,
+    storage="pantry",
+    quantity_to_buy=None,
+    amount_note=None,
+    source_recipe=None,
+):
     with conn:
         cursor = conn.execute(
-            "INSERT INTO shopping_list_items (name, storage, quantity_to_buy, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (name, storage, quantity_to_buy, _now()),
+            "INSERT INTO shopping_list_items "
+            "(name, storage, quantity_to_buy, amount_note, source_recipe, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (name, storage, quantity_to_buy, amount_note, source_recipe, _now()),
         )
         return cursor.lastrowid
 
 
 def list_shopping_list_items(conn):
-    rows = conn.execute("SELECT * FROM shopping_list_items ORDER BY created_at").fetchall()
+    rows = conn.execute(
+        "SELECT * FROM shopping_list_items WHERE deleted_at IS NULL ORDER BY created_at"
+    ).fetchall()
     return [dict(row) for row in rows]
 
 
 def get_shopping_list_item(conn, item_id):
+    """Fetch one *live* shopping-list row by id -- excludes a soft-deleted
+    row (returns None for one), same as get_item above.
+
+    This matters beyond display: shopping_list_resolve uses this lookup to
+    decide whether to go ahead with the checkoff/purchase mutation at all.
+    Before soft-delete existed, a deleted row simply didn't exist, so this
+    returning None (-> 404) for it was automatic; now that a deleted row
+    still exists with deleted_at set, this filter is what keeps a resolve
+    request against an already-removed list item from silently succeeding
+    and re-adding it to inventory.
+    """
     row = conn.execute(
-        "SELECT * FROM shopping_list_items WHERE id = ?", (item_id,)
+        "SELECT * FROM shopping_list_items WHERE id = ? AND deleted_at IS NULL", (item_id,)
     ).fetchone()
     return dict(row) if row else None
 
 
 def delete_shopping_list_item(conn, item_id):
+    """Soft-delete: mark the row deleted_at rather than removing it, so a
+    subsequent restore_shopping_list_item can undo this exact delete."""
     with conn:
-        conn.execute("DELETE FROM shopping_list_items WHERE id = ?", (item_id,))
+        conn.execute(
+            "UPDATE shopping_list_items SET deleted_at = ? WHERE id = ?", (_now(), item_id)
+        )
+
+
+def restore_shopping_list_item(conn, item_id):
+    """Undo a soft-delete by clearing deleted_at back to NULL. Idempotent for
+    the same reason as restore_item -- see its docstring."""
+    with conn:
+        conn.execute(
+            "UPDATE shopping_list_items SET deleted_at = NULL WHERE id = ?", (item_id,)
+        )
+
+
+def set_shopping_list_item_purchased(conn, item_id, purchased):
+    """Flip the persisted "purchased" checkbox only.
+
+    This never touches pantry_items/freezer inventory and never sets
+    reconciled_at -- checking or unchecking the box is purely a note to
+    self ("I bought this") and must be freely reversible any number of
+    times before Finish shopping ever runs. See
+    claim_shopping_list_item_for_finish for the separate, one-way action
+    that actually reconciles into inventory.
+    """
+    with conn:
+        conn.execute(
+            "UPDATE shopping_list_items SET purchased = ? WHERE id = ?",
+            (1 if purchased else 0, item_id),
+        )
+
+
+def claim_shopping_list_item_for_finish(conn, item_id):
+    """Atomically claim a purchased shopping-list item for Finish-shopping
+    reconciliation.
+
+    Returns True for exactly one caller per item -- the UPDATE only matches
+    (and only then flips reconciled_at from NULL to a timestamp) when the
+    item is still purchased, still live, and not already reconciled. Every
+    other call for that same item -- a genuine duplicate Finish-shopping
+    submission, a retried POST, two requests racing -- matches zero rows,
+    returns False, and must no-op rather than repeat the item's inventory
+    write. This is the idempotency mechanism the task calls for: whatever
+    inventory work Finish shopping does for an item happens at most once,
+    no matter how many times Finish shopping is called for the same
+    purchased set.
+    """
+    with conn:
+        cursor = conn.execute(
+            "UPDATE shopping_list_items SET reconciled_at = ? "
+            "WHERE id = ? AND purchased = 1 AND reconciled_at IS NULL AND deleted_at IS NULL",
+            (_now(), item_id),
+        )
+        return cursor.rowcount > 0
 
 
 _STAGING_FIELDS = (
@@ -284,10 +463,13 @@ _STAGING_FIELDS = (
     "estimated_value",
     "source_image_path",
     "section",
+    "batch_id",
+    "error",
+    "media_type",
 )
 
 
-def add_staging_item(conn, target_type, name, **fields):
+def add_staging_item(conn, target_type, name, status="pending", **fields):
     values = {field: fields.get(field) for field in _STAGING_FIELDS}
     values["target_type"] = target_type
     values["name"] = name
@@ -296,7 +478,7 @@ def add_staging_item(conn, target_type, name, **fields):
     with conn:
         cursor = conn.execute(
             f"INSERT INTO import_staging_items ({', '.join(columns)}) VALUES ({placeholders})",
-            [*values.values(), "pending", _now()],
+            [*values.values(), status, _now()],
         )
         return cursor.lastrowid
 
@@ -319,6 +501,40 @@ def get_staging_item(conn, item_id):
         "SELECT * FROM import_staging_items WHERE id = ?", (item_id,)
     ).fetchone()
     return dict(row) if row else None
+
+
+def group_staging_items_by_photo(items):
+    """Group staging rows (as returned by list_staging_items) by the photo
+    they were extracted from, preserving each group's and each item's
+    original order.
+
+    Rows sharing the same source_image_path are collected into one group
+    (keyed on that path), so the review page can show one thumbnail next to
+    all the rows it produced. A row with no source_image_path (a text
+    capture from /capture, not a photo upload) is never merged with another
+    row -- each becomes its own single-item, photo-less group, per the
+    plan's requirement that text captures get a distinct no-photo
+    presentation rather than being lumped into a shared "no photo" bucket.
+
+    Each group is {"source_image_path": ..., "rows": [...]} -- deliberately
+    *not* "items", since Jinja's attribute lookup on a plain dict resolves
+    `group.items` to the dict's own .items() method rather than a "items"
+    key, which silently breaks `group.items[0]` in the template.
+    """
+    groups = []
+    group_index_by_path = {}
+    for item in items:
+        path = item.get("source_image_path")
+        if path:
+            index = group_index_by_path.get(path)
+            if index is None:
+                group_index_by_path[path] = len(groups)
+                groups.append({"source_image_path": path, "rows": [item]})
+            else:
+                groups[index]["rows"].append(item)
+        else:
+            groups.append({"source_image_path": None, "rows": [item]})
+    return groups
 
 
 def update_staging_item(conn, item_id, **fields):
