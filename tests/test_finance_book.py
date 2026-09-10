@@ -28,7 +28,7 @@ def test_metadata_survives_sync_and_migration(tmp_path):
     book.initialize(db)
     row = book.view(db, now=NOW)['accounts'][0]
     assert (row['label'], row['provider_name'], row['owner'], row['balance']) == ('Our checking', 'New checking', 'Household', Decimal('200'))
-    assert len(book.view(db)['groups']) == 6
+    assert len(book.view(db)['groups']) == 7
 
 def test_manual_precision_currency_and_coverage(tmp_path):
     db = conn(tmp_path)
@@ -38,7 +38,38 @@ def test_manual_precision_currency_and_coverage(tmp_path):
     assert result['summary']['liquid'] == {'USD':Decimal('999999999999999999999999.123456789012345601'),'EUR':Decimal('3')}
     assert result['complete']
     assert all(a['source']=='manual' for a in result['accounts'])
-    assert book.view(db,now=NOW+timedelta(days=3))['coverage']['stale']==3
+    # Manual balances get a much longer staleness window than daily-synced ones.
+    assert book.view(db,now=NOW+timedelta(days=3))['coverage']['stale']==0
+    assert book.view(db,now=NOW+timedelta(days=181))['coverage']['stale']==3
+
+def test_manual_staleness_window_differs_from_synced_accounts(tmp_path):
+    db=conn(tmp_path); sync(db)
+    book.add_manual(db,nickname='Home',currency='USD',balance='500000',balance_at='2026-09-07',owner='',group_id=4)
+    just_under=book.view(db,now=NOW+timedelta(hours=47))['accounts']
+    assert not next(a for a in just_under if a['source']=='provider')['stale']
+    assert not next(a for a in just_under if a['source']=='manual')['stale']
+    past_sync_window=book.view(db,now=NOW+timedelta(hours=49))['accounts']
+    assert next(a for a in past_sync_window if a['source']=='provider')['stale']
+    assert not next(a for a in past_sync_window if a['source']=='manual')['stale']
+    past_manual_window=book.view(db,now=NOW+timedelta(days=181))['accounts']
+    assert next(a for a in past_manual_window if a['source']=='manual')['stale']
+
+def test_default_groups_include_vehicles_without_disturbing_inbox_id(tmp_path):
+    db=conn(tmp_path)
+    groups={g['id']:g for g in book.view(db)['groups']}
+    assert groups[7]==dict(id=7,name='Vehicles',bucket='illiquid',position=4)
+    assert groups[6]['name']=='Needs grouping' and groups[6]['bucket']=='unassigned'
+    with pytest.raises(store.FinanceStoreError):
+        book.save_group(db,group_id=6,name='Cash',bucket='liquid',position=1)
+
+def test_asset_kind_is_cosmetic_and_validated(tmp_path):
+    db=conn(tmp_path)
+    account_id=book.add_manual(db,nickname='Home',currency='USD',balance='500000',balance_at='2026-09-07',owner='',group_id=4,asset_kind='real_estate')
+    assert book.view(db)['accounts'][0]['asset_kind']=='real_estate'
+    book.update_manual(db,account_id,balance='510000',balance_at='2026-09-07',asset_kind='vehicle')
+    assert book.view(db)['accounts'][0]['asset_kind']=='vehicle'
+    with pytest.raises(store.FinanceStoreError):
+        book.add_manual(db,nickname='Bad',currency='USD',balance='1',balance_at='2026-09-07',owner='',group_id=4,asset_kind='boat')
 
 def test_missing_excluded_unassigned_and_debt(tmp_path):
     db=conn(tmp_path); sync(db,'-10'); edit(db,group_id=5)
@@ -88,7 +119,7 @@ def test_nested_mutations_can_be_rolled_back_together(tmp_path):
     db.execute('BEGIN IMMEDIATE')
     book.update_account(db,account_id,nickname='Changed',owner='',group_id=4,position=1,included=True,debt_sign='unconfirmed')
     with pytest.raises(store.FinanceStoreError):
-        book.update_manual(db,account_id,balance='NaN',balance_at='2026-09-07')
+        book.update_manual(db,account_id,balance='NaN',balance_at='2026-09-07',asset_kind='')
     db.rollback()
     assert book.view(db,now=NOW)['accounts'][0]['nickname']=='Home'
 

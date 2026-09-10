@@ -7,7 +7,7 @@
     <thead><tr><th scope="col">Account</th><th scope="col">Owner</th><th scope="col" class="number">Balance</th><th scope="col">Updated</th>{% if not frozen %}<th scope="col"><span class="sr-only">Edit</span></th>{% endif %}</tr></thead>
     <tbody>{% for account in section.accounts %}
       <tr class="{{ 'is-excluded' if not account.included else '' }}">
-        <th scope="row"><span class="ledger-account-name">{{ account.nickname or account.provider_name or account.label }}</span>
+        <th scope="row"><span class="ledger-account-name">{{ account.nickname or account.provider_name or account.label }}</span>{% if account.asset_kind %}<span class="finance-tag">{{ {'real_estate':'Real estate','vehicle':'Vehicle','other':'Other'}[account.asset_kind] }}</span>{% endif %}
           <span class="ledger-account-detail">{{ account.institution or ('Manual entry' if account.source == 'manual' else 'Connected account') }}{% if account.provider_name and account.nickname and account.provider_name != account.nickname %} · {{ account.provider_name }}{% endif %}</span>
           {% if not account.included %}<span class="finance-flag">Excluded from snapshot totals</span>{% endif %}
           {% if account.missing %}<span class="finance-flag">Missing from latest sync · excluded from totals</span>{% elif account.stale %}<span class="finance-flag">Stale balance</span>{% endif %}
@@ -17,7 +17,15 @@
         <td>{{ account.owner or '—' }}</td>
         <td class="number"><strong>{{ account.balance|finance_amount }}</strong><span class="ledger-currency">{{ account.currency if not account.nonfinancial else 'Custom unit' }}</span></td>
         <td><time datetime="{{ account.balance_at }}" title="{{ account.balance_at }}">{{ account.balance_at[:10] if frozen else account.balance_at|finance_age }}</time><span class="ledger-account-detail">{{ 'Manual' if account.source == 'manual' else 'Bank reported' }}</span></td>
-        {% if not frozen %}<td><a class="ledger-edit" href="{{ url_for('finance_account', account_id=account.id) }}" aria-label="Edit {{ account.nickname or account.provider_name or account.label }}">Edit</a></td>{% endif %}
+        {% if not frozen %}<td><a class="ledger-edit" href="{{ url_for('finance_account', account_id=account.id) }}" aria-label="Edit {{ account.nickname or account.provider_name or account.label }}">Edit</a>
+          {% if account.source == 'manual' %}<details class="ledger-quick-update"><summary>Update value</summary>
+            <form method="post" action="{{ url_for('finance_manual_balance', account_id=account.id) }}" class="ledger-form ledger-form--inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <label>Balance ({{ account.currency }})<input name="balance" inputmode="decimal" required value="{{ '{:f}'.format(account.balance) }}"></label>
+              <label>As of<input name="balance_at" type="date" max="{{ today }}" required value="{{ account.balance_at[:10] }}"></label>
+              <button class="btn" type="submit">Save</button>
+            </form>
+          </details>{% endif %}
+        </td>{% endif %}
       </tr>
     {% endfor %}</tbody>
     <tfoot>{% for currency, amount in section.totals.items() %}<tr><th scope="row" colspan="2">{{ section.group.name }} subtotal{% if section.group.bucket == 'debt' %} · amount owed{% endif %}</th><td class="number">{{ amount|finance_amount }} <span class="ledger-currency">{{ currency }}</span></td><td colspan="{{ 1 if frozen else 2 }}">{{ 'Complete coverage' if data.complete else 'Check coverage' }}</td></tr>{% else %}<tr><td colspan="{{ 4 if frozen else 5 }}">No confirmed monetary subtotal.</td></tr>{% endfor %}</tfoot>

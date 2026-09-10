@@ -24,7 +24,7 @@ def test_finance_writes_reject_missing_csrf(finance_app):
     app, path = finance_app
     seed(path)
     client = app.test_client()
-    for url in ['/finance/manual', '/finance/groups', '/finance/snapshots', '/finance/payments', '/finance/accounts/'+'a'*64+'/edit']:
+    for url in ['/finance/manual', '/finance/groups', '/finance/snapshots', '/finance/payments', '/finance/accounts/'+'a'*64+'/edit', '/finance/accounts/'+'a'*64+'/balance']:
         response = client.post(url, data={})
         assert response.status_code == 400
         assert response.headers['Cache-Control'] == 'no-store'
@@ -67,6 +67,34 @@ def test_account_edit_and_manual_snapshot(finance_app, monkeypatch):
     assert b'Household checking' in snapshot.data
     assert b'2026-01-01' in snapshot.data
     assert b'fonts.googleapis.com' not in snapshot.data
+
+
+def test_manual_quick_update_changes_balance_and_keeps_asset_kind(finance_app):
+    app, path = finance_app
+    seed(path)
+    client = app.test_client()
+    csrf = token(client)
+    client.post('/finance/manual', data={'csrf_token':csrf, 'nickname':'Home', 'currency':'USD',
+        'balance':'500000', 'balance_at':'2026-01-01', 'owner':'Joint', 'group_id':'4', 'asset_kind':'real_estate'})
+    conn = finance_store.connect(str(path))
+    account_id = conn.execute("SELECT id FROM finance_accounts WHERE source='manual'").fetchone()[0]
+    conn.close()
+    response = client.post('/finance/accounts/'+account_id+'/balance',
+        data={'csrf_token':csrf, 'balance':'525000', 'balance_at':'2026-06-01'})
+    assert response.status_code == 302
+    page = client.get('/finance')
+    assert b'525,000.00' in page.data
+    assert b'Real estate' in page.data
+
+
+def test_manual_quick_update_rejects_connected_account(finance_app):
+    app, path = finance_app
+    seed(path)
+    client = app.test_client()
+    csrf = token(client)
+    response = client.post('/finance/accounts/'+'a'*64+'/balance',
+        data={'csrf_token':csrf, 'balance':'1', 'balance_at':'2026-01-01'})
+    assert response.status_code == 404
 
 
 def test_invalid_manual_balance_keeps_form_values(finance_app):
