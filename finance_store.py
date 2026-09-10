@@ -167,12 +167,14 @@ def connect(path, repo_dir=None):
         """
     )
     connection.commit()
+    import finance_book
+    finance_book.initialize(connection)
     return connection
 
 
 def _validate_account(account):
     expected = {"id", "label", "currency", "balance", "balance_at"}
-    if not isinstance(account, dict) or set(account) != expected:
+    if not isinstance(account, dict) or not expected <= set(account) or set(account) - expected - {"provider_name", "institution"}:
         raise FinanceStoreError("Finance payload is invalid.")
     if not re.fullmatch(r"[0-9a-f]{64}", account["id"] or ""):
         raise FinanceStoreError("Finance payload is invalid.")
@@ -184,11 +186,17 @@ def _validate_account(account):
         or any(ord(character) < 32 or ord(character) == 127 for character in label)
     ):
         raise FinanceStoreError("Finance payload is invalid.")
+    for key in ("provider_name", "institution"):
+        value = account.get(key, "")
+        if not isinstance(value, str) or len(value) > 80 or any(ord(c) < 32 or ord(c) == 127 for c in value) or re.search(r"\d{4,}", value):
+            raise FinanceStoreError("Finance payload is invalid.")
     currency = account["currency"]
     if currency != "NONFINANCIAL" and not re.fullmatch(r"[A-Z]{3}", currency or ""):
         raise FinanceStoreError("Finance payload is invalid.")
     balance = account["balance"]
-    if not isinstance(balance, Decimal) or not balance.is_finite() or abs(balance) > MAX_ABS_BALANCE:
+    if not isinstance(balance, Decimal) or not balance.is_finite() or balance.copy_abs() > MAX_ABS_BALANCE:
+        raise FinanceStoreError("Finance payload is invalid.")
+    if balance.as_tuple().exponent < -18 or len(balance.as_tuple().digits) > 42:
         raise FinanceStoreError("Finance payload is invalid.")
     _parse_iso(account["balance_at"])
     return account
@@ -227,7 +235,7 @@ def _current_totals(conn):
     totals = {}
     rows = conn.execute(
         "SELECT currency, balance FROM finance_accounts "
-        "WHERE missing = 0 AND currency != 'NONFINANCIAL' ORDER BY currency"
+        "WHERE source = 'provider' AND missing = 0 AND currency != 'NONFINANCIAL' ORDER BY currency"
     )
     for row in rows:
         value = _stored_balance(row["balance"])
@@ -245,13 +253,14 @@ def record_sync(conn, payload, now=None):
     observed = _utc(now)
     observed_text = _iso(observed)
     status = "success" if payload["complete"] else "partial"
-    with conn:
+    from finance_book import _transaction
+    with _transaction(conn):
         previous_attempt = conn.execute(
             "SELECT last_attempt_at FROM finance_sync_status WHERE singleton = 1"
         ).fetchone()
         if previous_attempt and observed < _parse_iso(previous_attempt["last_attempt_at"]):
             raise FinanceStoreError("Finance observations may not be backdated.")
-        conn.execute("UPDATE finance_accounts SET missing = 1")
+        conn.execute("UPDATE finance_accounts SET missing = 1 WHERE source = 'provider'")
         for account in accounts:
             existing = conn.execute(
                 "SELECT balance_at FROM finance_accounts WHERE id = ?", (account["id"],)
@@ -288,6 +297,14 @@ def record_sync(conn, payload, now=None):
                     "UPDATE finance_accounts SET observed_at = ?, missing = 0 WHERE id = ?",
                     (observed_text, account["id"]),
                 )
+
+            conn.execute(
+                "UPDATE finance_accounts SET provider_name=?,institution=? WHERE id=?",
+                (account.get("provider_name", ""), account.get("institution", ""), account["id"]),
+            )
+            # Import pre-existing alias configuration only until locally customized.
+            if existing is None and not re.fullmatch(r"Account [0-9A-F]{8}", account["label"]):
+                conn.execute("UPDATE finance_accounts SET nickname=? WHERE id=? AND nickname=''", (account["label"],account["id"]))
 
         missing = conn.execute("SELECT 1 FROM finance_accounts WHERE missing = 1 LIMIT 1").fetchone()
         complete = payload["complete"] and not missing
@@ -327,7 +344,8 @@ def record_sync(conn, payload, now=None):
 def record_failure(conn, now=None):
     """Record a safe generic failed attempt without touching balances/history."""
     attempt = _iso(_utc(now))
-    with conn:
+    from finance_book import _transaction
+    with _transaction(conn):
         previous = conn.execute(
             "SELECT last_attempt_at, last_success_at FROM finance_sync_status WHERE singleton = 1"
         ).fetchone()
@@ -371,7 +389,7 @@ def dashboard(conn, now=None):
     accounts = []
     for row in conn.execute(
         "SELECT id, label, currency, balance, balance_at, observed_at, missing "
-        "FROM finance_accounts ORDER BY label, id"
+        "FROM finance_accounts WHERE source = 'provider' ORDER BY label, id"
     ):
         balance_at = _parse_iso(row["balance_at"])
         accounts.append(

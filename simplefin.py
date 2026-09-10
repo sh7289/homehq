@@ -14,8 +14,8 @@
         "complete": bool,
     }
 
-Provider account names, transaction data, extras, response errors, and raw
-identifiers never cross this module's boundary.
+Only sanitized provider display names cross the boundary; transaction data,
+extras, response errors, and raw identifiers never do.
 """
 
 import base64
@@ -222,7 +222,7 @@ def _balance(value):
         raise _error("data") from None
     if (
         not number.is_finite()
-        or abs(number) > MAX_ABS_BALANCE
+        or number.copy_abs() > MAX_ABS_BALANCE
         or number.as_tuple().exponent < -18
         or len(number.as_tuple().digits) > 40
     ):
@@ -303,12 +303,22 @@ def _warnings(data):
     return result
 
 
+def _display_name(value):
+    """Keep a short hint, masking account-number-like digit sequences."""
+    if not isinstance(value, str):
+        return ""
+    value = " ".join("".join(c if ord(c) >= 32 and ord(c) != 127 else " " for c in value).split())
+    value = re.sub(r"\d(?:[ -]?\d){3,}", "••••", value)
+    return value[:80]
+
+
 def _normalize(data):
     source_accounts = data.get("accounts")
     if not isinstance(source_accounts, list):
         raise _error("data") from None
     aliases = _aliases()
     connection_ids = _connection_ids(data)
+    institutions = {c["conn_id"]: _display_name(c.get("name")) for c in data.get("connections", [])}
     accounts = []
     seen = set()
     for item in source_accounts:
@@ -324,6 +334,8 @@ def _normalize(data):
             {
                 "id": account_id,
                 "label": aliases.get(account_id, "Account {}".format(account_id[:8].upper())),
+                "provider_name": _display_name(item.get("name")),
+                "institution": (_display_name(item["org"].get("name")) if isinstance(item.get("org"), dict) else "") or institutions.get(item.get("conn_id"), ""),
                 "currency": _currency(item.get("currency")),
                 "balance": _balance(item.get("balance")),
                 "balance_at": _balance_at(item.get("balance-date")),

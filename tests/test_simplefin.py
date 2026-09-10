@@ -163,8 +163,9 @@ def test_normalization_scopes_ids_to_v2_connection_and_discards_provider_text():
     first, second = result["accounts"]
     assert first["id"] != second["id"]
     assert len(first["id"]) == 64
-    assert set(first) == {"id", "label", "currency", "balance", "balance_at"}
-    assert "Provider" not in repr(result)
+    assert set(first) == {"id", "label", "provider_name", "institution", "currency", "balance", "balance_at"}
+    assert first["provider_name"] == "Provider Checking ••••"
+    assert first["institution"] == "Provider login name"
     assert "4321" not in first["label"]
     assert "transactions" not in repr(result)
     assert "sensitive" not in repr(result)
@@ -418,3 +419,9 @@ def test_transport_encoding_error_cannot_expose_credentials():
     with pytest.raises(simplefin.SimpleFINError) as caught:
         simplefin.fetch_balances('https://u:p@bridge.simplefin.org/simplefin', session=transport)
     assert secret not in ''.join(traceback.format_exception(type(caught.value), caught.value, caught.value.__traceback__))
+
+
+def test_display_names_strip_controls_and_mask_spaced_account_numbers():
+    assert simplefin._display_name("Bank\n account 1234-5678 9012") == "Bank account ••••"
+    assert len(simplefin._display_name("A" * 1000)) == 80
+    assert simplefin._display_name(None) == ""

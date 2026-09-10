@@ -225,3 +225,91 @@ re-enrollment. If the provider is unavailable, retain old balances with dates an
 warnings. Missing config/store is setup-needed, never a fabricated zero total.
 See [secret rotation](rotate-secrets.md). No server deployment, live token claim,
 or institution verification is implied by passing local tests.
+
+## Upgrade to the household worksheet and payment schedule
+
+The `codex/finance-snapshots` feature adds local nicknames, owners, sections,
+manual balances, saved household snapshots, and manually recorded card payments.
+The web service now writes these household records to the existing private finance
+DB. Bank access remains read-only; provider credentials still belong only to sync.
+
+After reviewing and integrating this branch, deploy the code before running the
+migration. Use your administrative SSH account (for example `gridwatch`) for sudo.
+Record the deployed commit and take a verified encrypted backup before the upgrade.
+Stop the app and sync while migrating so older code cannot run against the new schema:
+
+```bash
+sudo systemctl stop homehq
+sudo systemctl stop homehq-finance-sync.timer
+sudo systemctl stop homehq-finance-sync.service
+```
+
+Update the server checkout to the reviewed commit using the normal deployment
+procedure. Do not reset or overwrite locally modified files. With the updated code:
+
+```bash
+sudo -u homehq \
+  /home/homehq/homehq/.venv/bin/python \
+  /home/homehq/homehq/scripts/migrate_finance.py \
+  --db /home/homehq/data/finance.db
+
+sudo systemctl start homehq-finance-sync.service
+sudo journalctl -u homehq-finance-sync.service -n 20 --no-pager
+sudo systemctl start homehq
+sudo systemctl enable --now homehq-finance-sync.timer
+```
+
+Migration is additive and repeatable. It preserves existing balances, daily history,
+and imported aliases. GET requests never migrate the database. The first new sync
+adds sanitized institution/account names; until then, existing labels remain. This
+upgrade does not require a new SimpleFIN token or another MFA enrollment.
+
+Open Finance after MFA. For each account use **Edit** to choose a familiar nickname,
+owner, section, ordering, and inclusion. Cash and accessible investments have separate
+section subtotals but both count as liquid by default. Retirement/other illiquid assets
+are separate sections. **Manage sections & order** lets the household change these
+classifications. The default **Needs grouping** inbox always remains unassigned;
+move accounts out of it to classify them. New connections begin there; no asset/debt inference
+is made from an institution name or signed balance.
+
+For debts, confirm whether positive or negative balances mean amount owed against the
+institution's own display. Debt summaries are withheld for a currency with unconfirmed
+included debts. The account row always shows the provider's original signed balance.
+Excluded/missing/custom-unit accounts are not included in monetary totals. Stale dates
+remain visible and affect snapshot completeness. Manual entries use the supplied
+observation date and follow the same 48-hour stale rule; an old property valuation can
+therefore make a snapshot incomplete without changing the stored value.
+
+Use **Add a manual balance** for accounts outside SimpleFIN, cash, gift cards, or other
+assets. Do not add a manual duplicate of a connected account. Manual entries survive
+sync and must be updated manually. They do not enter the separate daily bank-sync
+history. No earlier household snapshots can be reconstructed from aggregate history.
+
+**Save snapshot** freezes names, sections, inclusion, balances, source dates, coverage,
+and payment records at capture time. Later changes cannot rewrite it. Comparison views
+flag scope changes and prior incomplete coverage. Missing/unconfirmed subtotals are
+unavailable, not zero; unsupported differences are suppressed. Currency totals remain
+separate, and differences are not investment returns.
+
+### Upcoming credit-card payments
+
+The [SimpleFIN account schema](https://www.simplefin.org/protocol.html#account) does
+not define scheduled-payment dates or amounts. Optional provider extras are not a
+reliable schedule, so this feature uses explicit household entries.
+
+Place the card in a debt section and its funding account in a liquid section, then
+use **Add a payment date**. Enter the actual expected withdrawal date, positive amount,
+and status. Both accounts must use the same currency. **Planned** is a household plan;
+**Scheduled with issuer** means you confirmed it in the issuer's app. This app never
+initiates a payment, sets up autopay, or verifies settlement. A statement due date and
+a withdrawal date may differ; enter the withdrawal date here.
+
+The summary includes active entries through the next 30 days plus overdue entries.
+Mark payments paid/cancelled yourself; no recurring charge is guessed and no date is
+automatically rolled forward. Recorded plans do not subtract from balances. Snapshot
+payment information is frozen with the snapshot, including the status at that time.
+
+The existing finance database backup includes all new household records. Verify a new
+backup after migration and preserve a pre-upgrade copy. To roll back code, stop app/sync
+first and restore the matching pre-upgrade database; the old sync code does not know
+about manual accounts and must not run against a worksheet database.

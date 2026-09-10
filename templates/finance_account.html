@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}Edit account · Home HQ{% endblock %}
+{% block fonts %}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/finance.css') }}">{% endblock %}
+{% block content %}<div class="finance ledger-editor"><a href="{{ url_for('finance') }}">← Back to Finance</a><header class="finance-heading"><div><p class="finance-eyebrow">Account details</p><h1>Make it recognizable</h1><p>{{ account.institution }}{% if account.provider_name %} · {{ account.provider_name }}{% endif %}</p></div></header>
+{% if error %}<p class="finance-notice" role="alert">{{ error }}</p>{% endif %}
+<form method="post" class="ledger-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Nickname<input name="nickname" maxlength="80" value="{{ request.form.get('nickname', account.nickname or '') }}" placeholder="Household checking"><small>A familiar name; leave blank to use the bank’s account name.</small></label>
+<label>Owner<input name="owner" maxlength="80" value="{{ request.form.get('owner', account.owner or '') }}" placeholder="Joint"></label>
+<label>Section<select name="group_id">{% for group in groups %}<option value="{{ group.id }}" {{ 'selected' if request.form.get('group_id', account.group_id|string) == group.id|string else '' }}>{{ group.name }}</option>{% endfor %}</select></label>
+<label>Order in section<input name="position" type="number" min="0" max="9999" value="{{ request.form.get('position', account.position) }}" required><small>Lower numbers appear first.</small></label>
+<label>Debt balance convention<select name="debt_sign">{% for key, text in [('unconfirmed','Not confirmed / not a debt account'),('positive','Positive balance means amount owed'),('negative','Negative balance means amount owed')] %}<option value="{{ key }}" {{ 'selected' if request.form.get('debt_sign', account.debt_sign) == key else '' }}>{{ text }}</option>{% endfor %}</select><small>Only used in debt sections. Check against your institution; the account row always shows the original signed balance.</small></label>
+<label class="ledger-checkbox"><input name="included" type="checkbox" {{ 'checked' if ('included' in request.form if request.method == 'POST' else account.included) else '' }}> Include in household totals</label>
+{% if account.source == 'manual' %}<label>Balance ({{ account.currency }})<input name="balance" inputmode="decimal" required value="{{ request.form.get('balance', '{:f}'.format(account.balance)) }}"></label><label>Balance date<input name="balance_at" type="date" required value="{{ request.form.get('balance_at', account.balance_at[:10]) }}"></label>{% else %}<p class="finance-help">Bank balance: {{ account.balance|finance_amount }} {{ account.currency }}. Updated by scheduled sync.</p>{% endif %}
+<div class="ledger-actions"><button class="btn btn--primary" type="submit">Save account</button><a href="{{ url_for('finance') }}">Cancel</a></div>
+</form></div>{% endblock %}

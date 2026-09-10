@@ -1,0 +1,14 @@
+{% with data=daily %}
+    <section class="finance-section" aria-labelledby="history-title"><h2 id="history-title">Daily observations</h2><p class="finance-help">Saved at sync time (UTC). Account changes affect totals. Incomplete days are excluded from the chart.</p>
+      {% set complete_days = data.history|selectattr('complete')|list %}
+      {% if complete_days|length < 2 %}<p class="finance-history-empty">Your history starts here. A chart appears after two complete daily observations.</p>{% else %}
+        {% for currency in data.totals.by_currency %}
+          {% set points = namespace(values=[]) %}{% for day in complete_days %}{% if currency in day.by_currency %}{% set points.values = points.values + [day.by_currency[currency]] %}{% endif %}{% endfor %}
+          {% if points.values|length > 1 %}{% set lo = points.values|min %}{% set hi = points.values|max %}{% set span = hi-lo if hi != lo else 1 %}
+          <figure class="finance-chart"><figcaption>{{ currency }} · complete daily totals</figcaption><svg viewBox="0 0 600 130" role="img" aria-label="{{ currency }} daily observations, with exact values in the table below"><line x1="15" y1="110" x2="585" y2="110" stroke="currentColor" opacity=".2"/>{% for day in data.history %}{% if day.complete and currency in day.by_currency %}<circle cx="{{ day.chart_x }}" cy="{{ 105 - ((day.by_currency[currency]-lo)/span)*85 }}" r="4" fill="currentColor"><title>{{ day.date }}: {{ currency }} {{ day.by_currency[currency] }}</title></circle>{% endif %}{% endfor %}</svg><div class="finance-chart-dates"><span>{{ data.history[0].date }}</span><span>{{ data.history[-1].date }}</span></div></figure>
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+      {% if data.history %}<details class="finance-history"><summary>View daily values</summary><div class="finance-table-wrap"><table><caption>Daily connected-account totals, by currency</caption><thead><tr><th scope="col">Date (UTC)</th><th scope="col">Currency</th><th scope="col">Balance</th><th scope="col">Response</th></tr></thead><tbody>{% for day in data.history|reverse %}{% for currency, amount in day.by_currency.items() %}<tr><td>{{ day.date }}</td><td>{{ currency }}</td><td>{{ amount|finance_amount }}</td><td>{{ 'Complete' if day.complete else 'Incomplete' }}</td></tr>{% else %}<tr><td>{{ day.date }}</td><td colspan="2">No monetary balances</td><td>{{ 'Complete' if day.complete else 'Incomplete' }}</td></tr>{% endfor %}{% endfor %}</tbody></table></div></details>{% endif %}
+    </section>
+{% endwith %}
