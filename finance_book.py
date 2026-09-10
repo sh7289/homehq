@@ -6,12 +6,18 @@ from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal, InvalidOperation, localcontext
 
-from finance_store import FinanceStoreError, _utc, _iso, _parse_iso, _stored_balance, STALE_AFTER
+from finance_store import FinanceStoreError, _utc, _iso, _parse_iso, _stored_balance, STALE_AFTER, MANUAL_STALE_AFTER
 
 BUCKETS = ('liquid', 'illiquid', 'debt', 'unassigned')
-DEFAULT_GROUPS = [('Cash & spending','liquid'), ('Accessible investments','liquid'),
-                  ('Retirement','illiquid'), ('Other illiquid assets','illiquid'),
-                  ('Debts','debt'), ('Needs grouping','unassigned')]
+ASSET_KINDS = {'': '', 'real_estate': 'Real estate', 'vehicle': 'Vehicle', 'other': 'Other'}
+# (id, name, bucket, position). Vehicles shares position 4 with "Other illiquid
+# assets" (tiebreak is id, so it sorts right after) rather than reassigning any
+# existing group's id/position -- group_id 6 is hardcoded elsewhere as the
+# "Needs grouping" ungrouped inbox and must keep that id on every install.
+DEFAULT_GROUPS = [(1,'Cash & spending','liquid',1), (2,'Accessible investments','liquid',2),
+                  (3,'Retirement','illiquid',3), (4,'Other illiquid assets','illiquid',4),
+                  (5,'Debts','debt',5), (6,'Needs grouping','unassigned',6),
+                  (7,'Vehicles','illiquid',4)]
 
 @contextmanager
 def _transaction(conn):
@@ -42,7 +48,7 @@ def initialize(conn):
                      'nickname':"TEXT NOT NULL DEFAULT ''", 'owner':"TEXT NOT NULL DEFAULT ''",
                      'group_id':'INTEGER NOT NULL DEFAULT 6', 'position':'INTEGER NOT NULL DEFAULT 0',
                      'included':'INTEGER NOT NULL DEFAULT 1', 'source':"TEXT NOT NULL DEFAULT 'provider'",
-                     'debt_sign':"TEXT NOT NULL DEFAULT 'unconfirmed'"}
+                     'debt_sign':"TEXT NOT NULL DEFAULT 'unconfirmed'", 'asset_kind':"TEXT NOT NULL DEFAULT ''"}
         for name, definition in additions.items():
             if name not in columns:
                 conn.execute('ALTER TABLE finance_accounts ADD COLUMN '+name+' '+definition)
@@ -51,8 +57,8 @@ def initialize(conn):
                 if not re.fullmatch(r'Account [0-9A-F]{8}',row['label']):
                     conn.execute('UPDATE finance_accounts SET nickname=? WHERE id=?',(row['label'],row['id']))
         conn.execute('CREATE TABLE IF NOT EXISTS finance_groups (id INTEGER PRIMARY KEY, name TEXT NOT NULL, bucket TEXT NOT NULL, position INTEGER NOT NULL)')
-        for i,(name,bucket) in enumerate(DEFAULT_GROUPS,1):
-            conn.execute('INSERT OR IGNORE INTO finance_groups VALUES (?,?,?,?)',(i,name,bucket,i))
+        for group_id,name,bucket,position in DEFAULT_GROUPS:
+            conn.execute('INSERT OR IGNORE INTO finance_groups VALUES (?,?,?,?)',(group_id,name,bucket,position))
         conn.execute('CREATE TABLE IF NOT EXISTS finance_saved_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, captured_at TEXT NOT NULL, actor TEXT NOT NULL, complete INTEGER NOT NULL, payload TEXT NOT NULL)')
         import finance_payments
         finance_payments.initialize(conn)
@@ -111,6 +117,12 @@ def save_group(conn,*,group_id=None,name,bucket,position):
         return group_id
 
 
+def _asset_kind(value):
+    if value not in ASSET_KINDS:
+        raise FinanceStoreError('Select a valid asset type.')
+    return value
+
+
 def _manual_values(balance,balance_at):
     if not isinstance(balance,str) or len(balance)>100 or not re.fullmatch(r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)',balance):
         raise FinanceStoreError('Enter a finite decimal balance.')
@@ -128,25 +140,27 @@ def _manual_values(balance,balance_at):
     return str(value), day.isoformat()+'T00:00:00Z'
 
 
-def add_manual(conn,*,nickname,currency,balance,balance_at,owner,group_id,position=0):
+def add_manual(conn,*,nickname,currency,balance,balance_at,owner,group_id,position=0,asset_kind=''):
     from simplefin import ISO_CURRENCIES
     nickname=_text(nickname,True); owner=_text(owner); position=_integer(position)
+    asset_kind=_asset_kind(asset_kind)
     if currency not in ISO_CURRENCIES:
         raise FinanceStoreError('Select a supported currency.')
     balance,balance_at=_manual_values(balance,balance_at)
     account_id='manual-'+uuid.uuid4().hex
     with _transaction(conn):
         group_id=_group(conn,group_id)
-        conn.execute("INSERT INTO finance_accounts(id,label,currency,balance,balance_at,observed_at,missing,nickname,owner,group_id,position,source) VALUES (?,?,?,?,?,?,0,?,?,?,?,'manual')",(account_id,nickname,currency,balance,balance_at,_iso(_utc()),nickname,owner,group_id,position))
+        conn.execute("INSERT INTO finance_accounts(id,label,currency,balance,balance_at,observed_at,missing,nickname,owner,group_id,position,source,asset_kind) VALUES (?,?,?,?,?,?,0,?,?,?,?,'manual',?)",(account_id,nickname,currency,balance,balance_at,_iso(_utc()),nickname,owner,group_id,position,asset_kind))
     return account_id
 
 
-def update_manual(conn,account_id,*,balance,balance_at):
+def update_manual(conn,account_id,*,balance,balance_at,asset_kind):
     balance,balance_at=_manual_values(balance,balance_at)
+    asset_kind=_asset_kind(asset_kind)
     with _transaction(conn):
         if _account(conn,account_id)['source']!='manual':
             raise FinanceStoreError('Connected balances can only be updated by sync.')
-        conn.execute('UPDATE finance_accounts SET balance=?,balance_at=?,observed_at=? WHERE id=?',(balance,balance_at,_iso(_utc()),account_id))
+        conn.execute('UPDATE finance_accounts SET balance=?,balance_at=?,observed_at=?,asset_kind=? WHERE id=?',(balance,balance_at,_iso(_utc()),asset_kind,account_id))
 
 
 def view(conn,now=None):
@@ -173,7 +187,7 @@ def _view(conn,current):
             a=dict(row)
             a['balance']=_stored_balance(a['balance'])
             for key in ('missing','included'): a[key]=bool(a[key])
-            a['stale']=current-_parse_iso(a['balance_at'])>STALE_AFTER
+            a['stale']=current-_parse_iso(a['balance_at'])>(MANUAL_STALE_AFTER if a['source']=='manual' else STALE_AFTER)
             a['nonfinancial']=a['currency']=='NONFINANCIAL'
             a['label']=a['nickname'] or a['provider_name'] or a['label']
             section=by_group[a['group_id']]; bucket=section['group']['bucket']

@@ -31,6 +31,7 @@
           <label>Account name<input name="nickname" maxlength="80" required value="{{ request.form.get('nickname', '') }}" placeholder="Cash &amp; gift cards"></label>
           <label>Owner<input name="owner" maxlength="80" value="{{ request.form.get('owner', '') }}" placeholder="Joint"></label>
           <label>Section<select name="group_id">{% for group in data.groups %}<option value="{{ group.id }}" {{ 'selected' if request.form.get('group_id') == group.id|string else '' }}>{{ group.name }}</option>{% endfor %}</select></label>
+          <label>Asset type<select name="asset_kind">{% for key, label in [('','—'),('real_estate','Real estate'),('vehicle','Vehicle'),('other','Other')] %}<option value="{{ key }}" {{ 'selected' if request.form.get('asset_kind', '') == key else '' }}>{{ label }}</option>{% endfor %}</select><small>Optional, for scanning at a glance.</small></label>
           <label>Currency<input name="currency" maxlength="3" minlength="3" required value="{{ request.form.get('currency', 'USD') }}"></label>
           <label>Balance<input name="balance" type="text" inputmode="decimal" required value="{{ request.form.get('balance', '') }}" placeholder="0.00"></label>
           <label>Balance date<input name="balance_at" type="date" max="{{ today }}" required value="{{ request.form.get('balance_at', today) }}"></label>

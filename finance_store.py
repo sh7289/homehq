@@ -43,6 +43,9 @@ from pathlib import Path
 
 
 STALE_AFTER = timedelta(hours=48)
+# Manual balances (home value, vehicle value, etc.) are refreshed by hand, not
+# by a daily sync — a much longer window avoids flagging them stale within days.
+MANUAL_STALE_AFTER = timedelta(days=180)
 MAX_ABS_BALANCE = Decimal("1e24")
 SAFE_WARNINGS = frozenset(
     {

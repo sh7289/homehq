@@ -154,7 +154,8 @@ def init_app(app):
                             included='included' in request.form, debt_sign=request.form.get('debt_sign', 'unconfirmed'))
                         if 'balance' in request.form:
                             finance_book.update_manual(conn, account_id, balance=request.form['balance'],
-                                                       balance_at=request.form.get('balance_at', ''))
+                                                       balance_at=request.form.get('balance_at', ''),
+                                                       asset_kind=request.form.get('asset_kind', ''))
                         conn.commit()
                     return redirect(url_for('finance'))
                 except (ValueError, finance_store.FinanceStoreError):
@@ -180,7 +181,29 @@ def init_app(app):
                 finance_book.add_manual(conn, nickname=request.form.get('nickname', ''),
                     currency=request.form.get('currency', ''), balance=request.form.get('balance', ''),
                     balance_at=request.form.get('balance_at', ''), owner=request.form.get('owner', ''),
-                    group_id=request.form.get('group_id', ''), position=0)
+                    group_id=request.form.get('group_id', ''), position=0,
+                    asset_kind=request.form.get('asset_kind', ''))
+            return redirect(url_for('finance'))
+        except (OSError, sqlite3.Error, UpgradeNeeded):
+            return render_worksheet('Saving is unavailable. Check the finance setup.', 503)
+        except (ValueError, finance_store.FinanceStoreError):
+            return mutation_failed()
+
+    @app.route('/finance/accounts/<account_id>/balance', methods=['POST'])
+    @_enabled
+    @require_recent_mfa
+    @_csrf
+    def finance_manual_balance(account_id):
+        try:
+            with _open(write=True) as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                data = finance_book.view(conn)
+                account = next((a for a in data['accounts'] if a['id'] == account_id), None)
+                if account is None or account['source'] != 'manual':
+                    abort(404)
+                finance_book.update_manual(conn, account_id, balance=request.form.get('balance', ''),
+                    balance_at=request.form.get('balance_at', ''), asset_kind=account['asset_kind'])
+                conn.commit()
             return redirect(url_for('finance'))
         except (OSError, sqlite3.Error, UpgradeNeeded):
             return render_worksheet('Saving is unavailable. Check the finance setup.', 503)
