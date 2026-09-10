@@ -24,6 +24,16 @@ def _shopping_list():
         conn.close()
 
 
+def _db_items(storage=None):
+    import db
+
+    conn = db.get_connection(os.environ["HOMEHQ_DB_PATH"])
+    try:
+        return db.list_items(conn, storage=storage)
+    finally:
+        conn.close()
+
+
 def _add_pantry_item(name, quantity, unit, storage="pantry"):
     import db
 
@@ -359,3 +369,108 @@ def test_shop_notice_count_is_reverified_against_the_database_not_trusted(client
 
     assert "Added 1 ingredient to the shopping list." in body
     assert "999" not in body
+
+
+# --- Seam tests (deferred cleanup item 8) -----------------------------------
+
+
+def test_recipe_shop_to_finish_shopping_round_trip(client, app):
+    """Task 7 -> Task 5 seam: recipe_shop writes storage="fresh" for a
+    Fresh-bucket ingredient and storage="pantry" for a Missing-bucket one
+    (see recipe_shop); Finish shopping's purchased-state flow must handle
+    both correctly once they're checked off -- the fresh item completes
+    with no inventory write at all, while the pantry item reconciles into
+    an existing pantry row when matched (Task 5's match-or-new choice)."""
+    _setup_chili(client, app)
+
+    # add-0 = Onions (fresh bucket -> storage="fresh").
+    # add-3 = Saffron threads (missing bucket, no match yet -> storage="pantry").
+    client.post("/recipes/chili/shop", data={"serves": "", "add-0": "on", "add-3": "on"})
+
+    list_items = {item["name"]: item for item in _shopping_list()}
+    assert list_items["Onions"]["storage"] == "fresh"
+    assert list_items["Saffron threads"]["storage"] == "pantry"
+
+    # A pantry row to match the Saffron item into at Finish-shopping time --
+    # added after recipe_shop's own bucket check so it can't accidentally
+    # turn Saffron threads into a check/on_hand row instead of missing.
+    client.post(
+        "/pantry/add",
+        data={"name": "Saffron", "quantity": "1", "unit": "jar", "location": ""},
+    )
+    saffron_pantry_id = next(
+        i["id"] for i in _db_items(storage="pantry") if i["name"] == "Saffron"
+    )
+
+    for item in list_items.values():
+        client.post(f"/shopping-list/{item['id']}/toggle-purchased")
+
+    saffron_list_id = list_items["Saffron threads"]["id"]
+    response = client.post(
+        "/shopping-list/finish",
+        data={
+            f"action-{saffron_list_id}": "match",
+            f"matched_item_id-{saffron_list_id}": str(saffron_pantry_id),
+            f"quantity-{saffron_list_id}": "1",
+        },
+    )
+
+    assert response.status_code == 302
+    # Both items reconciled -- the shopping list is empty either way (the
+    # fresh item's own reconciliation carries no action-<id> field at all).
+    assert _shopping_list() == []
+
+    pantry = {i["name"]: i for i in _db_items(storage="pantry")}
+    assert pantry["Saffron"]["quantity"] == 2  # 1 existing + 1 reconciled
+    # The fresh ingredient never touches inventory -- the pre-existing
+    # "Onions" pantry row from _setup_chili is untouched, not incremented.
+    assert pantry["Onions"]["quantity"] == 3
+
+
+def test_row_editor_ingredients_drive_the_four_bucket_classification(client, app):
+    """Task 8 (row editor) -> Task 7 (pantry_check) seam: ingredients saved
+    through the row editor's structured POST fields (recipe_ingredients)
+    must come back with their fresh/staple flags intact and bucketed
+    correctly on the next GET -- fresh always wins its own bucket
+    regardless of a match, staple+match is on_hand, a plain match is
+    check, and no match is missing."""
+    _write_recipe(app, "buckets.md", "---\nname: Buckets\nkind: meal\n---\nCook.\n")
+    _add_pantry_item("Flour", 2, "kg", storage="pantry")
+    _add_pantry_item("Chicken", 1, "kg", storage="pantry")
+    _login(client)
+
+    client.post(
+        "/recipes/buckets/ingredients",
+        data={
+            "ingredient_row": ["0", "1", "2", "3"],
+            "ingredient_name": ["Basil", "Flour", "Chicken", "Cumin"],
+            "ingredient_quantity": ["", "2", "1", ""],
+            "ingredient_unit": ["", "kg", "kg", ""],
+            "ingredient_fresh": ["0"],
+            "ingredient_staple": ["1"],
+            "ingredients_source": "rows",
+        },
+    )
+
+    body = client.get("/recipes/buckets").data.decode()
+
+    # Basil: fresh flag -> fresh bucket, always listed and pre-checked.
+    basil_checkbox = re.search(r'<input type="checkbox"[^>]*name="add-0"[^>]*>', body)
+    assert basil_checkbox and "checked" in basil_checkbox.group(0)
+
+    # Flour: staple flag + a pantry match -> on_hand, collapsed and not
+    # pre-checked.
+    flour_checkbox = re.search(r'<input type="checkbox"[^>]*name="add-1"[^>]*>', body)
+    assert flour_checkbox and "checked" not in flour_checkbox.group(0)
+    assert "On hand, assumed enough" in body
+
+    # Chicken: no flags but a pantry match -> check bucket, two unchecked
+    # radios rather than either checkbox/auto-resolution.
+    have = re.search(r'<input type="radio" name="check-2" value="have"[^>]*>', body)
+    add = re.search(r'<input type="radio" name="check-2" value="add"[^>]*>', body)
+    assert have and "checked" not in have.group(0)
+    assert add and "checked" not in add.group(0)
+
+    # Cumin: no flags and no match -> missing bucket, listed and pre-checked.
+    cumin_checkbox = re.search(r'<input type="checkbox"[^>]*name="add-3"[^>]*>', body)
+    assert cumin_checkbox and "checked" in cumin_checkbox.group(0)

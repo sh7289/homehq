@@ -79,6 +79,27 @@ def _recipe_shop_summary_message(added_count):
     )
 
 
+def _titlecase(value):
+    """Turn a snake/kebab-case token into a human-readable title, e.g.
+    "side_dish" -> "Side Dish". Shared by the `titlecase` Jinja filter and
+    any Python call site that needs the same formatting outside a template
+    (see the recipes-filter-summary code in create_app)."""
+    return value.replace("_", " ").replace("-", " ").title()
+
+
+def _amount_text(ingredient):
+    """Join an ingredient's quantity+unit into a display string, e.g.
+    "1.5 lb" -- the same idiom used in recipe_detail.html's ingredient rows.
+    Returns "" when there's nothing to show. Shared by the `amount` Jinja
+    filter and _ingredient_amount_note (see create_app)."""
+    parts = []
+    if ingredient.get("quantity"):
+        parts.append(str(ingredient["quantity"]))
+    if ingredient.get("unit"):
+        parts.append(str(ingredient["unit"]))
+    return " ".join(parts)
+
+
 class User(UserMixin):
     def __init__(self, username):
         self.id = username
@@ -170,7 +191,11 @@ def create_app():
 
     @app.template_filter("titlecase")
     def titlecase_filter(value):
-        return value.replace("_", " ").replace("-", " ").title()
+        return _titlecase(value)
+
+    @app.template_filter("amount")
+    def amount_filter(ingredient):
+        return _amount_text(ingredient)
 
     @app.template_filter("paragraphs")
     def paragraphs_filter(text):
@@ -427,37 +452,57 @@ def create_app():
         anchor = f"row-{item_id}" if item_id is not None else None
         return redirect(url_for(storage, _anchor=anchor, **kwargs))
 
-    def _add_inventory_item(storage):
-        name = request.form.get("name", "").strip()
-        quantity_raw = request.form.get("quantity", "").strip()
-        query = request.form.get("q", "")
-        filter_key = request.form.get("filter") or "all"
-
+    def _parse_quantity_and_shelf_life(form, quantity_field_id, shelf_life_field_id):
+        """Parse+validate the `quantity`/`shelf_life_days` fields shared by
+        the add-item and edit-item forms. Shelf life is only checked once
+        quantity itself is error-free, matching both call sites' original
+        short-circuit behavior. Returns (quantity, shelf_life_days, errors)
+        -- errors is a list of {"field_id": ..., "message": ...} dicts."""
+        quantity_raw = form.get("quantity", "").strip()
         errors = []
         quantity = None
-        if not name:
-            errors.append({"field_id": "name", "message": "Give the item a name."})
-        elif not quantity_raw:
-            errors.append({"field_id": "quantity", "message": "Enter a quantity."})
+        if not quantity_raw:
+            errors.append({"field_id": quantity_field_id, "message": "Enter a quantity."})
         else:
             try:
                 quantity = float(quantity_raw)
             except ValueError:
-                errors.append({"field_id": "quantity", "message": "Quantity must be a number."})
+                errors.append(
+                    {"field_id": quantity_field_id, "message": "Quantity must be a number."}
+                )
 
         shelf_life_days = None
         if not errors:
-            shelf_life_raw = request.form.get("shelf_life_days", "").strip()
+            shelf_life_raw = form.get("shelf_life_days", "").strip()
             if shelf_life_raw:
                 try:
                     shelf_life_days = int(shelf_life_raw)
                 except ValueError:
                     errors.append(
                         {
-                            "field_id": "shelf_life_days",
+                            "field_id": shelf_life_field_id,
                             "message": "Shelf life override must be a whole number of days.",
                         }
                     )
+
+        return quantity, shelf_life_days, errors
+
+    def _add_inventory_item(storage):
+        name = request.form.get("name", "").strip()
+        query = request.form.get("q", "")
+        filter_key = request.form.get("filter") or "all"
+
+        errors = []
+        quantity = None
+        shelf_life_days = None
+        if not name:
+            errors.append({"field_id": "name", "message": "Give the item a name."})
+        else:
+            quantity, shelf_life_days, errors = _parse_quantity_and_shelf_life(
+                request.form,
+                quantity_field_id="quantity",
+                shelf_life_field_id="shelf_life_days",
+            )
 
         if errors:
             return _render_inventory_page(
@@ -557,32 +602,11 @@ def create_app():
         query = request.form.get("q", "")
         filter_key = request.form.get("filter") or "all"
 
-        quantity_raw = request.form.get("quantity", "").strip()
-        errors = []
-        quantity = None
-        if not quantity_raw:
-            errors.append({"field_id": f"quantity-{item_id}", "message": "Enter a quantity."})
-        else:
-            try:
-                quantity = float(quantity_raw)
-            except ValueError:
-                errors.append(
-                    {"field_id": f"quantity-{item_id}", "message": "Quantity must be a number."}
-                )
-
-        shelf_life_days = None
-        if not errors:
-            shelf_life_raw = request.form.get("shelf_life_days", "").strip()
-            if shelf_life_raw:
-                try:
-                    shelf_life_days = int(shelf_life_raw)
-                except ValueError:
-                    errors.append(
-                        {
-                            "field_id": f"shelf-life-{item_id}",
-                            "message": "Shelf life override must be a whole number of days.",
-                        }
-                    )
+        quantity, shelf_life_days, errors = _parse_quantity_and_shelf_life(
+            request.form,
+            quantity_field_id=f"quantity-{item_id}",
+            shelf_life_field_id=f"shelf-life-{item_id}",
+        )
 
         if errors:
             return _render_inventory_page(
@@ -622,6 +646,13 @@ def create_app():
             if value:
                 db.set_section(conn, item_id, sections.normalize(storage, value))
         return _redirect_to_storage_page()
+
+    # Unlike inventory's storage whitelist ("pantry", "freezer" -- see
+    # _redirect_to_storage_page/inventory_update), the shopping list also
+    # legitimately carries "fresh" rows: ingredients that are always bought
+    # rather than tracked in inventory (see recipe_shop, which writes
+    # storage="fresh" for Fresh-bucket ingredients).
+    SHOPPING_LIST_STORAGES = ("pantry", "freezer", "fresh")
 
     @app.route("/shopping-list")
     @login_required
@@ -670,10 +701,13 @@ def create_app():
     def shopping_list_add():
         quantity_to_buy = request.form.get("quantity_to_buy", "").strip()
         amount_note = request.form.get("amount_note", "").strip()
+        storage = request.form.get("storage", "pantry")
+        if storage not in SHOPPING_LIST_STORAGES:
+            storage = "pantry"
         db.add_shopping_list_item(
             get_db(),
             name=request.form["name"].strip(),
-            storage=request.form.get("storage", "pantry"),
+            storage=storage,
             quantity_to_buy=float(quantity_to_buy) if quantity_to_buy else None,
             amount_note=amount_note or None,
         )
@@ -1068,7 +1102,7 @@ def create_app():
                 "effort 1 only" if parsed_max_effort == 1 else f"effort {parsed_max_effort} or less"
             )
         if kind:
-            active_filters.append(kind.replace("_", " ").replace("-", " ").title())
+            active_filters.append(_titlecase(kind))
         if category:
             active_filters.append(category)
 
@@ -1494,17 +1528,26 @@ def create_app():
     def _ingredient_amount_note(ingredient):
         """The recipe's own (already-scaled, if applicable) amount as plain
         text, e.g. "2 cups" -- the same join the ingredient list itself
-        uses. None when there's nothing recorded, rather than fabricating
-        a placeholder."""
-        parts = []
-        if ingredient.get("quantity"):
-            parts.append(str(ingredient["quantity"]))
-        if ingredient.get("unit"):
-            parts.append(str(ingredient["unit"]))
-        return " ".join(parts) if parts else None
+        uses (see _amount_text / the `amount` Jinja filter). None when
+        there's nothing recorded, rather than fabricating a placeholder."""
+        return _amount_text(ingredient) or None
 
     def _recipe_source_label(recipe):
         return f"{recipe.name} ({recipe.slug})"
+
+    def _scale_recipe_ingredients(recipe, target):
+        """Derive the scaling factor for `target` servings against
+        `recipe`'s own yield, and scale its ingredients accordingly.
+        Scaling is a view concern: the stored recipe file never changes.
+        Returns (factor, ingredients, base_serves)."""
+        base_serves = recipe.frontmatter.get("serves")
+        factor = recipe_scale.factor_for(base_serves, target)
+        ingredients = (
+            recipe_scale.scale(recipe.ingredients, factor)
+            if factor != 1
+            else recipe.ingredients
+        )
+        return factor, ingredients, base_serves
 
     @app.route("/recipes/<slug>")
     @login_required
@@ -1513,15 +1556,8 @@ def create_app():
         if recipe is None:
             abort(404)
 
-        base_serves = recipe.frontmatter.get("serves")
         target = request.args.get("serves")
-        factor = recipe_scale.factor_for(base_serves, target)
-        # Scaling is a view concern: the stored file never changes.
-        ingredients = (
-            recipe_scale.scale(recipe.ingredients, factor)
-            if factor != 1
-            else recipe.ingredients
-        )
+        factor, ingredients, base_serves = _scale_recipe_ingredients(recipe, target)
         shown_serves = (
             int(float(target)) if factor != 1 and target else base_serves
         )
@@ -1612,14 +1648,8 @@ def create_app():
             abort(404)
 
         conn = get_db()
-        base_serves = recipe.frontmatter.get("serves")
         target = request.form.get("serves") or None
-        factor = recipe_scale.factor_for(base_serves, target)
-        ingredients = (
-            recipe_scale.scale(recipe.ingredients, factor)
-            if factor != 1
-            else recipe.ingredients
-        )
+        factor, ingredients, base_serves = _scale_recipe_ingredients(recipe, target)
 
         rows = pantry_check.check_ingredients(ingredients, _combined_inventory(conn))
         source_recipe = _recipe_source_label(recipe)

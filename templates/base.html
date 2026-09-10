@@ -36,12 +36,14 @@
         </form>
       </header>
 
-      {# Desktop nav rail: Home, then Food (the everyday destinations) and
-         Household (admin/insurance destinations, including every catalog
-         category nested under a Catalog disclosure). Hidden on narrow
-         viewports in favor of .nav-mobile below -- CSS display:none removes
-         whichever one isn't current from the accessibility tree, so a
-         screen reader or keyboard user only ever encounters one. #}
+      {# Desktop nav rail: Home and Add as top-level links (Finance joins
+         them too, conditionally, when HOMEHQ_FINANCE_ENABLED is set), then
+         Food (the everyday destinations) and Household (admin/insurance
+         destinations, including every catalog category nested under a
+         Catalog disclosure). Hidden on narrow viewports in favor of
+         .nav-mobile below -- CSS display:none removes whichever one isn't
+         current from the accessibility tree, so a screen reader or
+         keyboard user only ever encounters one. #}
       <nav class="nav" aria-label="Main">
         <a href="{{ url_for('home') }}"
            class="nav__top-link {{ 'is-active' if active == 'home' else '' }}"

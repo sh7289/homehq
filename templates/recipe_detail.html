@@ -98,11 +98,7 @@
             <li class="row cook-row">
               <input type="checkbox" class="cook-check no-print" id="ing-check-{{ loop.index }}"
                      aria-label="Mark {{ ingredient.name }} as done">
-              <label for="ing-check-{{ loop.index }}" class="row__name">{{ ingredient.name }}</label>
-              {%- set amount = [] -%}
-              {%- if ingredient.quantity %}{{- amount.append(ingredient.quantity) or '' -}}{% endif -%}
-              {%- if ingredient.unit %}{{- amount.append(ingredient.unit) or '' -}}{% endif -%}
-              <span class="row__meta">{{ amount|join(' ') }}</span>
+              <label for="ing-check-{{ loop.index }}" class="row__name">{{ ingredient.name }}</label><span class="row__meta">{{ ingredient|amount }}</span>
               {% if ingredient.fresh %}
                 <span class="tag-fresh" title="Always added to the shopping list — the pantry doesn't track fresh goods">Fresh</span>
               {% elif ingredient.staple %}
@@ -132,10 +128,8 @@
                   <tr>
                     <th scope="row">
                       {{ row.ingredient.name }}
-                      {%- set amount = [] -%}
-                      {%- if row.ingredient.quantity %}{{- amount.append(row.ingredient.quantity) or '' -}}{% endif -%}
-                      {%- if row.ingredient.unit %}{{- amount.append(row.ingredient.unit) or '' -}}{% endif -%}
-                      {% if amount %}<span class="cfe__amount">{{ amount|join(' ') }}</span>{% endif %}
+                      {%- set amount = row.ingredient|amount -%}
+                      {% if amount %}<span class="cfe__amount">{{ amount }}</span>{% endif %}
                     </th>
                     {% for cell in row.cells %}
                       <td rowspan="{{ cell.rowspan }}" class="{{ 'cfe__gap' if cell.spacer else '' }}">{{ cell.action }}</td>
@@ -183,10 +177,7 @@
                   <div class="row__info">
                     <label for="shop-add-{{ row.index }}" class="row__name">{{ row.ingredient.name }}</label>
                     <span class="row__meta">
-                      {%- set amount = [] -%}
-                      {%- if row.ingredient.quantity %}{{- amount.append(row.ingredient.quantity) or '' -}}{% endif -%}
-                      {%- if row.ingredient.unit %}{{- amount.append(row.ingredient.unit) or '' -}}{% endif -%}
-                      {{ amount|join(' ') }}
+                      {{- row.ingredient|amount }}
                       {% if row.bucket == 'fresh' %}&middot; fresh{% else %}&middot; not in inventory{% endif %}
                     </span>
                     {% if row.bucket == 'fresh' and row.match %}
@@ -211,11 +202,7 @@
                     <div class="row">
                       <div class="row__info">
                         <span class="row__name">{{ row.ingredient.name }}</span>
-                        <span class="row__meta">
-                          {%- set amount = [] -%}
-                          {%- if row.ingredient.quantity %}{{- amount.append(row.ingredient.quantity) or '' -}}{% endif -%}
-                          {%- if row.ingredient.unit %}{{- amount.append(row.ingredient.unit) or '' -}}{% endif -%}
-                          Recipe needs: {{ amount|join(' ') }}
+                        <span class="row__meta">Recipe needs: {{ row.ingredient|amount }}
                         </span>
                         <span class="row__meta">
                           {{ row.match.storage|titlecase }} says: {{ row.match.name }} &middot; {{ row.match.quantity }}{% if row.match.unit %} {{ row.match.unit }}{% endif %}

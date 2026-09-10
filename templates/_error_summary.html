@@ -9,6 +9,14 @@
    after a failed submit, so a keyboard/screen-reader user lands on the
    summary immediately instead of hunting the page for what went wrong.
 
+   `id` defaults to "error-summary" (every existing call site keeps working
+   unchanged) but can be overridden so a page can render two independent
+   instances at once -- e.g. add_errors and edit_error side by side -- if
+   it ever needs to. Note base.html's focus-on-load script only targets
+   the default "error-summary" id, so a second, differently-id'd instance
+   won't auto-focus; that's fine for the common single-instance case this
+   was built for.
+
    field_message()/field_attrs() render the matching inline message next to
    a given field, and the aria-invalid/aria-describedby attributes that tie
    the field to it -- call field_attrs() inside the input tag and
@@ -18,9 +26,9 @@
    This partial is deliberately generic (it only assumes {field_id, message}
    dicts) so any other form in the app can adopt it later without change. #}
 
-{% macro error_summary(errors, heading="Please fix the following before saving:") %}
+{% macro error_summary(errors, heading="Please fix the following before saving:", id="error-summary") %}
   {% if errors %}
-    <div class="error-summary" role="alert" tabindex="-1" id="error-summary">
+    <div class="error-summary" role="alert" tabindex="-1" id="{{ id }}">
       <p class="error-summary__heading">{{ heading }}</p>
       <ul class="error-summary__list">
         {% for err in errors %}
