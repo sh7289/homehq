@@ -59,6 +59,22 @@ def test_add_item_accepts_an_amount_note(client):
     assert b"a bunch" in response.data
 
 
+def test_add_item_rejects_an_unrecognized_storage_value(client):
+    """storage is whitelisted to pantry/freezer/fresh (see
+    SHOPPING_LIST_STORAGES in app.py) -- anything else falls back to
+    pantry rather than being written to the database as-is."""
+    _login(client)
+
+    response = client.post(
+        "/shopping-list/add",
+        data={"name": "Mystery item", "storage": "garage"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert _shopping_list()[0]["storage"] == "pantry"
+
+
 def test_delete_removes_shopping_list_item(client):
     _login(client)
     client.post("/shopping-list/add", data={"name": "Rice", "storage": "pantry"})
