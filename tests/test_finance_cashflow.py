@@ -121,3 +121,11 @@ def test_window_and_recurring_occurrences(tmp_path):
     assert f['end_date'] == '2026-11-30'
     assert [e['date'] for e in f['events']] == ['2026-11-01']
     assert f['past_due'] == []  # the October payment was before the balance date and is a normal past occurrence
+
+
+def test_forecast_states_how_much_undated_bills_leave_out(tmp_path):
+    conn = full_db(tmp_path)
+    f = C.forecast(conn, TODAY, now=NOW)
+    # Seeded undated outflows: monthly bills plus tirzepatide $599 quarterly (199.67/month).
+    assert f['undated_out_monthly'] == Decimal('7926.16')
+    assert any('7,926.16' in r for r in f['reasons'])

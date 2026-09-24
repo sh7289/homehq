@@ -81,7 +81,8 @@ def funds(conn, month):
             balance = Decimal(opening['amount']) + added - spent_total
         rows.append(dict(id=category['id'], name=category['name'], setup_needed=opening is None,
                          opened_on=opening['movement_date'] if opening else None, balance=balance, spent_total=spent_total,
-                         month_spent=_spending(conn, ids, start=first, end=last), month_added=month_added,
+                         month_spent=_spending(conn, ids, start=max(first, opening['movement_date']) if opening else first,
+                                               end=last), month_added=month_added,
                          notes=category['notes']))
     return rows
 

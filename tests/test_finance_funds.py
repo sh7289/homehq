@@ -135,3 +135,13 @@ def test_holds_reduce_unallocated(tmp_path):
     assert (r['state'], r['unallocated']) == ('ok', Decimal('4000.00'))
     B.set_money_setting(conn, 'reserve_holds', '')
     assert B.money_setting(conn, 'reserve_holds') is None
+
+
+def test_month_spent_counts_only_since_opening(tmp_path):
+    conn = full_db(tmp_path)
+    xmas = cat(conn, 'Gifts and Christmas')
+    t = L.create_txn(conn, account_id=CARD_H, txn_date='2026-10-03', amount='-70', description='EARLY GIFT', actor='s')
+    L.classify(conn, t, kind='expense', allocations=[dict(category_id=xmas, person='shared', amount='-70')], actor='s')
+    opening(conn, 'Gifts and Christmas', '900', day='2026-10-10')
+    fund = next(f for f in F.funds(conn, '2026-10') if f['id'] == xmas)
+    assert (fund['balance'], fund['month_spent']) == (Decimal('900.00'), Decimal('0.00'))

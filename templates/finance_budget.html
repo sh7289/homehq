@@ -19,7 +19,7 @@
 <section class="budget-numbers" aria-label="Three numbers that stay separate">
   <article><span class="finance-label">Remaining category budget</span><strong>{{ money(d.numbers.remaining_budget) }}</strong><span>Across this month’s allowances{% if s.quality != 'complete' %} · provisional{% endif %}</span></article>
   <article><span class="finance-label">Available cash</span><strong>{{ money(d.numbers.available_cash) }}</strong><span>Checking{% if d.forecast.minimum %}, less your {{ d.forecast.minimum|finance_amount }} minimum{% endif %}{% if d.forecast.as_of %} · as of {{ d.forecast.as_of }}{% endif %}</span></article>
-  <article><span class="finance-label">Projected cash after commitments</span><strong>{{ money(d.numbers.projected_cash) }}</strong><span><a href="{{ url_for('finance_forecast') }}">Checking on {{ d.forecast.end_date }}</a>{% if d.forecast.state != 'ok' %} · {{ 'incomplete' if d.forecast.state == 'provisional' else 'unknown' }}{% endif %}</span></article>
+  <article><span class="finance-label">Projected cash after commitments</span><strong>{{ money(d.numbers.projected_cash) }}</strong><span><a href="{{ url_for('finance_forecast') }}">Checking on {{ d.forecast.end_date }}</a>{% if d.forecast.state != 'ok' %} · {{ 'incomplete' if d.forecast.state == 'provisional' else 'unknown' }}{% endif %}{% if d.forecast.undated_out_monthly %} · leaves out about {{ d.forecast.undated_out_monthly|finance_amount }} a month of undated bills{% endif %}</span></article>
 </section>
 <p class="finance-help">These three answer different questions. Money left in a category is not money in checking, and cash in checking isn’t all free to spend.</p>
 

@@ -282,3 +282,8 @@ def test_forecast_page_lists_undated_commitments(budget_app):
     app, _ = budget_app
     page = app.test_client().get('/finance/forecast').data
     assert b'Mortgage' in page and b'need a date' in page
+
+
+def test_dashboard_says_what_forecast_leaves_out(budget_app):
+    app, _ = budget_app
+    assert b'a month of undated bills' in app.test_client().get('/finance/budget').data

@@ -17,6 +17,8 @@ from finance_store import MANUAL_STALE_AFTER, STALE_AFTER, _parse_iso, _utc
 
 ZERO = Decimal('0.00')
 RECENT_PAST = timedelta(days=7)
+PER_MONTH = {'weekly': Decimal(52) / 12, 'biweekly': Decimal(26) / 12, 'monthly': Decimal(1), 'quarterly': Decimal(1) / 3,
+             'semiannual': Decimal(1) / 6, 'annual': Decimal(1) / 12, 'once': Decimal(0)}
 
 
 def _window_end(today):
@@ -35,10 +37,14 @@ def forecast(conn, today, now=None):
         "SELECT a.id, a.balance, a.balance_at, a.missing, a.source FROM finance_accounts a JOIN finance_budget_accounts b "
         "ON b.account_id=a.id WHERE b.included=1 AND b.role='checking' AND a.currency=? ORDER BY a.id", (currency,)).fetchall()
     commitments = finance_recurring.commitments(conn)
-    needs = [c['name'] for c in commitments if c['status'] == 'active' and (not c['next_date'] or not c['account_id'])]
+    undated = [c for c in commitments if c['status'] == 'active' and (not c['next_date'] or not c['account_id'])]
+    needs = [c['name'] for c in undated]
+    undated_out = sum((c['amount'] * PER_MONTH[c['cadence']] for c in undated if c['direction'] == 'out'),
+                      ZERO).quantize(Decimal('0.01'))
     result = dict(state='ok', reasons=[], accounts=[names.get(r['id'], '') for r in rows], as_of=None, start_balance=None,
                   minimum=minimum, available_cash=None, end_date=end.isoformat(), events=[], lowest=None,
-                  below_minimum=None, uncovered_card_payments=[], end_balance=None, past_due=[], needs_date=needs)
+                  below_minimum=None, uncovered_card_payments=[], end_balance=None, past_due=[], needs_date=needs,
+                  undated_out_monthly=undated_out)
     if not rows:
         return dict(result, state='unknown', reasons=['Include a checking account in Budget settings to see a forecast.'])
     for row in rows:
@@ -82,7 +88,8 @@ def forecast(conn, today, now=None):
             below = dict(date=event['date'], balance=running)
     if needs:
         result['state'] = 'provisional'
-        result['reasons'].append(f'{len(needs)} commitments need a date or account before they can be forecast.')
+        left_out = f" (about ${format(undated_out, ',f')} a month of bills is not included)" if undated_out else ''
+        result['reasons'].append(f'{len(needs)} commitments need a date or account before they can be forecast{left_out}.')
     if past:
         result['reasons'].append(f'{len(past)} expected items are dated on or before the balance date. Confirm they went through.')
     past.sort(key=lambda e: e['date'])

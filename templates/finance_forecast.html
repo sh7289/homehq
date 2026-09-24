@@ -13,7 +13,7 @@
 <section class="ledger-summary budget-summary" aria-label="Forecast totals">
   <article><span class="finance-label">Checking now</span><strong>{{ f.start_balance|finance_amount }}</strong><span>{{ f.accounts|join(', ') }} · as of {{ f.as_of }}</span></article>
   <article><span class="finance-label">Lowest point</span><strong class="{{ 'budget-over' if f.below_minimum }}">{{ (f.lowest.balance if f.lowest else f.start_balance)|finance_amount }}</strong><span>{{ ('on ' ~ f.lowest.date) if f.lowest else 'No dated items' }}{% if f.minimum %} · minimum {{ f.minimum|finance_amount }}{% endif %}</span></article>
-  <article><span class="finance-label">On {{ f.end_date }}</span><strong>{{ f.end_balance|finance_amount }}</strong><span>Projected cash after commitments</span></article>
+  <article><span class="finance-label">On {{ f.end_date }}</span><strong>{{ f.end_balance|finance_amount }}</strong><span>Projected cash after commitments{% if f.undated_out_monthly %} · <strong>leaves out about {{ f.undated_out_monthly|finance_amount }} a month of undated bills</strong>{% endif %}</span></article>
 </section>
 {% if f.events %}<div class="finance-table-wrap"><table class="ledger-table"><thead><tr><th scope="col">Date</th><th scope="col">Item</th><th scope="col" class="number">Amount</th><th scope="col" class="number">Checking after</th></tr></thead><tbody>
 {% for e in f.events %}<tr class="{{ 'budget-row--risk' if e.running < f.minimum }}"><td>{{ e.date }}</td><th scope="row">{{ e.label }}</th><td class="number {{ 'budget-in' if e.amount > 0 }}">{{ e.amount|finance_amount }}</td><td class="number"><strong>{{ e.running|finance_amount }}</strong></td></tr>{% endfor %}
