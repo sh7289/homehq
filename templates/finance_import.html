@@ -1,0 +1,55 @@
+{% extends "finance_budget_base.html" %}
+{% set labels = {'date': 'Date', 'description': 'Description', 'amount': 'Amount', 'debit': 'Debit (money out)', 'credit': 'Credit (money in)', 'posted_date': 'Posted date (optional)', 'status': 'Status (optional)', 'id': 'Transaction ID (optional)'} %}
+{% block page_title %}Import #{{ batch.id }}{% endblock %}
+{% block heading %}Import #{{ batch.id }} · {{ batch.label }}{% endblock %}
+{% block intro %}<p class="finance-intro">{{ batch.account_name }} · uploaded {{ batch.created_at[:10] }} by {{ batch.imported_by }}</p>{% endblock %}
+{% block budget_content %}
+{% if batch.state == 'staged' %}
+<form method="post" action="{{ url_for('finance_import_commit', batch_id=batch.id) }}" class="budget-import">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <section class="ledger-section" aria-labelledby="map-title">
+    <header class="ledger-section-title"><h2 id="map-title">1. Match the columns</h2><span>Remembered for this account next time</span></header>
+    <div class="ledger-form">
+      {% for field in fields %}
+      <label>{{ labels[field] }}<select name="map_{{ field }}"><option value="">—</option>{% for column in columns %}<option value="{{ loop.index0 }}" {{ 'selected' if mapping.get(field) == loop.index0 }}>{{ column or 'Column ' ~ loop.index }}</option>{% endfor %}</select></label>
+      {% endfor %}
+      <label>Signs<select name="sign">{% for key, label in signs.items() %}<option value="{{ key }}" {{ 'selected' if mapping.get('sign') == key }}>{{ label }}</option>{% endfor %}</select><small>Check the sample: purchases should show as negative.</small></label>
+    </div>
+    <button class="btn" type="submit" name="action" value="preview">Update preview</button>
+  </section>
+  <section class="ledger-section" aria-labelledby="preview-title">
+    <header class="ledger-section-title"><h2 id="preview-title">2. Check the preview</h2><span>Nothing is saved until you import</span></header>
+    {% if mapping_error %}<p class="finance-notice">{{ mapping_error }}</p>
+    {% elif preview %}
+      <p class="budget-preview-counts"><strong>{{ preview.new }} new</strong> · {{ preview.duplicate }} already imported{% if preview.possible_duplicate %} · {{ preview.possible_duplicate }} may match entries added by hand (they’ll be flagged for review){% endif %}</p>
+      {% if preview.errors %}<div class="finance-notice" role="alert"><p>Fix the column choices or the file. These rows can’t be read:</p><ul>{% for e in preview.errors[:20] %}<li>{{ e }}</li>{% endfor %}</ul>{% if preview.errors|length > 20 %}<p>…and {{ preview.errors|length - 20 }} more.</p>{% endif %}</div>{% endif %}
+      {% if preview.sample %}<div class="finance-table-wrap"><table class="ledger-table"><thead><tr><th scope="col">Date</th><th scope="col">Description</th><th scope="col" class="number">Amount</th><th scope="col">Status</th></tr></thead><tbody>
+        {% for r in preview.sample %}<tr><td>{{ r.txn_date }}</td><th scope="row">{{ r.description }}</th><td class="number {{ 'budget-in' if r.amount > 0 }}">{{ r.amount|finance_amount }}</td><td>{{ r.status|title }}</td></tr>{% endfor %}
+      </tbody></table></div>{% if preview.new > 20 %}<p class="finance-help">Showing the first 20 new rows.</p>{% endif %}{% endif %}
+    {% endif %}
+  </section>
+  {% if preview and not preview.errors and not mapping_error %}
+  <section class="ledger-section" aria-labelledby="period-title">
+    <header class="ledger-section-title"><h2 id="period-title">3. Confirm what this file covers</h2><span>Used to tell complete months from incomplete ones</span></header>
+    <p class="finance-help">Enter the full date range of the export, even days with no transactions. Budget months are marked incomplete until every included account is covered.</p>
+    <div class="ledger-form">
+      <label>From<input type="date" name="period_start" required value="{{ request.form.get('period_start', preview.first_date or '') }}"></label>
+      <label>Through<input type="date" name="period_end" required value="{{ request.form.get('period_end', preview.last_date or '') }}"></label>
+    </div>
+    <button class="btn btn--primary" type="submit" name="action" value="commit">Import {{ preview.new }} transaction{{ 's' if preview.new != 1 }}</button>
+  </section>
+  {% endif %}
+</form>
+<form method="post" action="{{ url_for('finance_import_discard', batch_id=batch.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn" type="submit">Discard this upload</button></form>
+{% elif batch.state == 'committed' %}
+<section class="ledger-section" aria-labelledby="done-title">
+  <header class="ledger-section-title"><h2 id="done-title">Imported</h2><span>{{ batch.committed_at[:10] }}</span></header>
+  <p>{{ batch.new_count }} new transactions, {{ batch.duplicate_count }} already imported. <a href="{{ url_for('finance_transactions', account=batch.account_id) }}">Review them</a>.</p>
+  <form method="post" action="{{ url_for('finance_import_rollback', batch_id=batch.id) }}" class="budget-void">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="ledger-checkbox"><input type="checkbox" name="confirm_edited" value="1"> Also remove transactions from this import that were already reviewed</label>
+    <button class="btn" type="submit">Undo this import</button>
+  </form>
+</section>
+{% else %}<p class="finance-notice">This import was undone {{ batch.rolled_back_at[:10] }}.</p>{% endif %}
+{% endblock %}

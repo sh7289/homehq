@@ -106,3 +106,32 @@ def test_void_and_candidates(tmp_path):
     L.void(conn, near, actor='s')
     assert L.link_candidates(conn, out, 'card_payment') == []
     assert far
+
+
+def test_review_inbox_shows_undecided_and_unmatched(tmp_path):
+    conn = ledger_db(tmp_path)
+    done = L.create_txn(conn, account_id=CARD_H, txn_date='2026-11-01', amount='-30', description='SHOP', actor='h')
+    L.classify(conn, done, kind='expense', allocations=[alloc(conn, 'Household wants', 'shared', '-30')], actor='h')
+    open_item = L.create_txn(conn, account_id=CARD_H, txn_date='2026-11-02', amount='-12', description='OTHER', actor='h')
+    lone = L.create_txn(conn, account_id=CHECKING, txn_date='2026-11-03', amount='-100', description='TO SAVINGS', actor='h')
+    L.classify(conn, lone, kind='transfer', allocations=[], actor='h')
+    manual = L.create_txn(conn, account_id=CARD_S, txn_date='2026-11-04', amount='-9', description='A', actor='h')
+    assert {r['id'] for r in L.transactions(conn, view='review')} == {open_item, lone, manual}
+    assert len(L.transactions(conn, view='all', month='2026-11')) == 4
+    assert [r['id'] for r in L.transactions(conn, view='all', category_id=cat(conn, 'Household wants'))] == [done]
+    assert manual
+
+
+def test_keep_both_clears_duplicate_flag(tmp_path):
+    import finance_import as I
+    from datetime import datetime, timezone
+    conn = ledger_db(tmp_path)
+    L.create_txn(conn, account_id=CHECKING, txn_date='2026-11-02', amount='-20', description='CASH', actor='s')
+    b = I.stage(conn, account_id=CHECKING, data=b'Date,Description,Amount\n2026-11-02,ATM,-20\n', label='x', actor='s',
+                now=datetime(2026, 12, 1, tzinfo=timezone.utc))
+    I.commit(conn, b, {'date': 0, 'description': 1, 'amount': 2, 'sign': 'outflow_negative'}, period_start='2026-11-01',
+             period_end='2026-11-30', actor='s', now=datetime(2026, 12, 1, tzinfo=timezone.utc))
+    flagged = conn.execute('SELECT id FROM finance_txns WHERE possible_duplicate_of IS NOT NULL').fetchone()['id']
+    assert flagged in {r['id'] for r in L.transactions(conn, view='review')}
+    L.keep_both(conn, flagged, 's')
+    assert L.get_txn(conn, flagged)['possible_duplicate_of'] is None

@@ -335,3 +335,39 @@ def get_txn(conn, txn_id):
     txn['source_records'] = [dict(source=r['source'], batch_id=r['batch_id'], columns=json.loads(r['columns_json']))
                              for r in conn.execute('SELECT * FROM finance_source_records WHERE txn_id=? ORDER BY id', (txn['id'],))]
     return txn
+
+
+def keep_both(conn, txn_id, actor):
+    """The user confirmed a flagged possible duplicate is a separate purchase."""
+    actor = _text(actor, True)
+    with _transaction(conn):
+        _touch(conn, _txn(conn, txn_id)['id'], actor, possible_duplicate_of=None)
+
+
+def transactions(conn, *, view='review', month=None, account_id=None, category_id=None, limit=200):
+    """Inbox rows, newest first. ``review`` shows what still needs a decision."""
+    where, args = [], []
+    if view == 'review':
+        where.append("t.status NOT IN ('void','replaced') AND (t.review != 'accepted' OR t.possible_duplicate_of IS NOT NULL "
+                     "OR (t.kind IN ('transfer','card_payment') AND NOT EXISTS (SELECT 1 FROM finance_txn_links l "
+                     "WHERE l.kind IN ('transfer','card_payment') AND (l.from_txn_id=t.id OR l.to_txn_id=t.id))))")
+    if month:
+        where.append('t.txn_date BETWEEN ? AND ?')
+        args += [month + '-01', month + '-31']
+    if account_id:
+        where.append('t.account_id=?')
+        args.append(account_id)
+    if category_id:
+        where.append('EXISTS (SELECT 1 FROM finance_txn_allocations a JOIN finance_budget_categories c ON c.id=a.category_id '
+                     'WHERE a.txn_id=t.id AND (c.id=? OR c.parent_id=?))')
+        args += [category_id, category_id]
+    names = _display(conn)
+    rows = conn.execute(
+        "SELECT t.*, sc.name AS suggested_name, (SELECT GROUP_CONCAT(c.name, ', ') FROM finance_txn_allocations a "
+        "JOIN finance_budget_categories c ON c.id=a.category_id WHERE a.txn_id=t.id) AS category_names, "
+        "(SELECT COUNT(*) FROM finance_txn_allocations a WHERE a.txn_id=t.id) AS lines, "
+        "(SELECT COUNT(*) FROM finance_txn_links l WHERE l.from_txn_id=t.id OR l.to_txn_id=t.id) AS link_count "
+        "FROM finance_txns t LEFT JOIN finance_budget_categories sc ON sc.id=t.suggested_category_id "
+        + ('WHERE ' + ' AND '.join(where) if where else '') + ' ORDER BY t.txn_date DESC, t.id DESC LIMIT ?',
+        args + [limit]).fetchall()
+    return [dict(r, amount=Decimal(r['amount']), account_name=names.get(r['account_id'], '')) for r in rows]
