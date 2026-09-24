@@ -27,6 +27,7 @@ TABLES = frozenset({
     'finance_budget_settings', 'finance_budget_accounts', 'finance_budget_categories',
     'finance_budget_targets', 'finance_import_batches', 'finance_staged_rows', 'finance_txns',
     'finance_source_records', 'finance_txn_allocations', 'finance_txn_links', 'finance_coverage',
+    'finance_fund_movements',
 })
 
 SCHEMA = """
@@ -106,6 +107,12 @@ CREATE TABLE IF NOT EXISTS finance_coverage (
   start_date TEXT NOT NULL, end_date TEXT NOT NULL,
   source TEXT NOT NULL CHECK (source IN ('import','declared')),
   batch_id INTEGER REFERENCES finance_import_batches(id) ON DELETE CASCADE,
+  created_by TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS finance_fund_movements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category_id INTEGER NOT NULL REFERENCES finance_budget_categories(id),
+  kind TEXT NOT NULL CHECK (kind IN ('opening','contribution','release','adjustment')),
+  amount TEXT NOT NULL, movement_date TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
   created_by TEXT NOT NULL, created_at TEXT NOT NULL);
 """
 
@@ -460,3 +467,24 @@ def declare_coverage(conn, *, account_id, start, end, actor, today=None, source=
         conn.execute('INSERT INTO finance_coverage (account_id,start_date,end_date,source,batch_id,created_by,created_at) '
                      'VALUES (?,?,?,?,?,?,?)', (account_id, start_day.isoformat(), end_day.isoformat(), source, batch_id,
                                                 actor, _iso(_utc())))
+
+
+MONEY_SETTINGS = ('checking_minimum', 'reserve_holds')
+
+
+def money_setting(conn, key):
+    value = get_setting(conn, key)
+    return Decimal(value) if value else None
+
+
+def set_money_setting(conn, key, value):
+    """Store a non-negative amount, or clear the setting when the value is blank."""
+    if key not in MONEY_SETTINGS or not isinstance(value, str):
+        raise FinanceStoreError('That setting is not available.')
+    with _transaction(conn):
+        if not value.strip():
+            conn.execute('DELETE FROM finance_budget_settings WHERE key=?', (key,))
+            return
+        amount = money_text(parse_money(value, signed=False))
+        conn.execute('INSERT INTO finance_budget_settings VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                     (key, amount))
