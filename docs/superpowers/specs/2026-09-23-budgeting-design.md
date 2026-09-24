@@ -30,19 +30,68 @@ security gates. SimpleFIN transaction sync stays out of V1, as the product spec 
 
 ## Decomposition
 
-The product spec is too large for one implementation plan. It is built in five phases,
-each with its own plan, branch-level review, and merge. Each phase leaves Finance working.
+The product spec is too large for one implementation plan. Following the adversarial
+review (`home_hq_budget_adversarial_review.md`, §4), work ships as three releases.
+Each release is made of phases, and each phase gets its own plan, review and merge
+and leaves Finance working.
 
-| Phase | Delivers | Product spec acceptance tests |
+| Release | Phase | Delivers | Acceptance tests |
+|---|---|---|---|
+| **R1: prove the workflow** | **1. Ledger foundation** | Canonical transactions, splits, transfers/card payments/refunds, pending→posted, CSV import + manual entry with idempotent dedupe, coverage, categories and household category policy, effective-dated targets (including income and planned savings), account budget roles, review inbox, month view with spending vs plan, data-quality status, operating-plan affordability line | Spec 4, 5, 6 (spending side), 9, 11, 12, 13, 18; review "uncategorized $400" |
+| R1 | **2. Funds, cash and export** | Remaining/rollover per category, sinking funds (actual allocations only) with reserve funding status, simple dated checking forecast from balances + existing `finance_payments`, the three distinct cash numbers, the six sustainability dimensions panel, financial-exception alerts, transaction/category CSV export | Spec 1, 2, 3, 6, 7, 8, 9, 14, 15, 16; review "funds exceed backing", "card payment before paycheck" |
+| **R2: forecasting and annual planning** | **3. Planning** | Recurring commitments and forecast occurrences, financing end dates, near-term fund gaps and catch-up contributions, savings plan vs actual cash accumulation, HSA measures, bonus allocation proposals (never automatic) | Spec 10; review "savings shortfall", "planned contribution unfunded", bonus test |
+| R2 | **4. Review and close** | Weekly check-in record, month close with *originally closed* and *restated actuals* views, reopen/revise, V1 reports (§8.2) with variances shown without automatic judgment, user "mark for attention" | Spec 17 |
+| **R3: reduce effort** | **5. Automation** | SimpleFIN transaction ingestion in the sync CLI, merchant rules, later AI suggestions, drift detection once history exists | Needs a separate decision after checking provider data |
+
+R1 succeeds when Heather and Steve use it for one complete month and trust the numbers.
+The rest of this document specifies Phase 1 in full, fixes the cross-phase
+decisions later phases depend on, and adds the review's P0 requirements.
+
+## Household financial sustainability (adversarial review, adopted)
+
+Staying within discretionary targets never stands in for overall financial health. The
+budget pages evaluate six dimensions separately. Each dimension shows its own status:
+good, attention, or unknown. A good status in one dimension never hides an
+attention or unknown status in another.
+
+| Dimension | Phase | Basis |
 |---|---|---|
-| **1. Ledger foundation** | Canonical transactions, splits, transfers/card payments/refunds, pending→posted, CSV import + manual entry with idempotent dedupe, coverage, categories, effective-dated targets, account budget roles, review inbox, monthly spending by category | 4, 5, 6 (spending side), 9, 11, 12, 13, 18 |
-| **2. Budget dashboard** | Remaining/rollover per category, sinking funds and fund movements, recurring commitments and forecast occurrences, `finance_payments` integration, the three distinct cash numbers | 1, 2, 3, 7, 8, 10, 14, 15, 16 |
-| **3. Weekly review and month close** | Weekly check-in record, versioned month closes, reopen/revise | 17 |
-| **4. Reports and exports** | V1 reports (§8.2), CSV exports (§8.3), baseline variance alerts (§6.3) | none (report checks) |
-| **5. Automation** | SimpleFIN transaction ingestion in the sync CLI, merchant rules, later AI suggestions | Needs a separate decision after checking provider data |
+| Operating affordability | 1 | Planned income − fixed − expected variable − allowances − fund contributions − planned savings = plan surplus/deficit |
+| Discretionary compliance | 1 (spent) / 2 (remaining) | Capped categories vs targets |
+| Reserve adequacy | 2 | Eligible reserve cash − fund allocations − holds; shortfall shown |
+| Savings progress | 3 | Committed savings vs actual cash accumulation |
+| Near-term liquidity | 2 | Dated checking forecast; first date below the configured minimum |
+| Data reliability | 1 | complete / provisional / insufficient data (below) |
 
-The rest of this document specifies Phase 1 in full and fixes the cross-phase
-data model decisions that later phases depend on.
+**Plan completeness.** The affordability line is labeled *validated* only when
+every contributing target has basis `historical`. If any target is `planning` or
+`estimate`, it is labeled *provisional*, with the count of unvalidated lines. An
+operating category with no expected amount makes the plan *incomplete* and is
+named; it is never treated as $0.
+
+**Data-quality status per month.** *Insufficient data*: an included account has no
+coverage for part of the month. *Provisional*: coverage is full, but unreviewed or
+uncategorized outflows exist, or pending items are unresolved. *Complete*: neither.
+Uncategorized outflows always count in total known spending and are shown as their
+own line. Category remaining figures are labeled provisional while the month is not
+complete.
+
+**Two calculation paths (architectural invariant).** Budget accounting (what was
+earned or consumed, by category and period, at purchase date) lives in
+`finance_ledger_math.py`. Cash forecasting (what enters or leaves which account and
+when, including card settlements) lives in a separate `finance_cashflow.py` (Phase 2).
+They share transaction rows but not aggregation functions. A test asserts that a card
+purchase appears only in budget accounting and its settlement only in cash flow.
+
+**Funds hold only actual allocations.** A scheduled or planned contribution never
+credits a fund. Only a user-confirmed allocation movement does. Unknown opening
+balances stay "setup needed".
+
+**Categorization is material, not forensic.** Splitting is optional. Settings hold a
+short household category policy (per-category "includes / excludes" text, agreed
+during setup) that is shown next to the category picker. Categorizing by
+predominant purpose is a first-class option. Personal categories may use `reset`
+or `carry` rollover. The seeded default stays `reset` until the household decides.
 
 ## Cross-phase decisions
 
@@ -100,8 +149,9 @@ finance_budget_accounts   account_id PK → finance_accounts.id, included 0/1,
                           role (checking | savings | reserve | card | hsa | loan | other),
                           csv_sign (outflow_negative | outflow_positive | debit_credit_columns)
 finance_budget_categories id, name, parent_id, type (operating | capped | sinking |
-                          income | transfer | other), default_person, active,
-                          rollover (reset | capped | carry), rollover_cap, position, notes
+                          income | savings | transfer | other), default_person, active,
+                          rollover (reset | capped | carry), rollover_cap, position,
+                          policy_includes, policy_excludes, notes
 finance_budget_targets    category_id, effective_month 'YYYY-MM', amount, basis
                           (planning | estimate | historical), note
                           -- the target for a month is the latest effective_month <= that month
@@ -125,7 +175,15 @@ finance_txn_links         id, kind, from_txn_id, to_txn_id NULL, created_by, cre
 hierarchy with its types and §6.4 rollover defaults (household wants: capped at $900
 total available), plus §6.1 targets effective `2026-11` with basis `planning`.
 Sinking funds get no balances; that is Phase 2 and starts at "setup needed".
-Operating categories get no targets, because §2.3 forbids inventing baselines.
+Operating categories get no targets, because §2.3 forbids inventing baselines, so the plan starts
+*incomplete* until the household enters them. Seeded alongside: an Income category
+with the $11,952 figure as an `estimate` target, a Savings category with no target (the
+savings objective is an open household decision, so the plan stays incomplete until it is
+set), and each §2.2 commitment as a subcategory of its §6.2 parent (Mortgage under Housing,
+Liz and Haley under Childcare, etc.) with its recorded amount as an `estimate` target and
+the spec's caveat in the target note (Georgia Power: $215, note "range $200–230"; mattress:
+note "placeholder"; RAV4 and fence: note with the expected end). A parent's planned amount
+is the sum of its children's targets plus its own.
 
 ## Phase 1 behavior
 
@@ -162,10 +220,12 @@ existing `finance_payments` row (Test 6); the full forecast integration is Phase
 sign; category add/edit/deactivate; new effective-dated target (never edits a past
 target row in place); coverage table with first/last covered date per included account.
 
-**Month view** (`/finance/budget?month=YYYY-MM`, Phase 1 version): spending by category
-(posted and pending shown separately), uncategorized total, target where one
-exists (labeled planning / estimate / historical), and a coverage banner naming each
-included account and the dates it lacks for that month (Test 13). Phase 2 turns
+**Month view** (`/finance/budget?month=YYYY-MM`, Phase 1 version): the data-quality
+status and a coverage banner naming each included account and the dates it lacks
+(Test 13); the operating-plan affordability line with its validated / provisional /
+incomplete label; total known spending, with an uncategorized line; spending by
+category (posted and pending shown separately) against its target, labeled
+planning / estimate / historical. Phase 2 turns
 this page into the full dashboard.
 
 **Navigation**: a Finance sub-nav partial (Overview · Transactions · Budget · Settings)
@@ -192,12 +252,15 @@ TDD per module, in the existing pytest style with temp private DBs:
   identical rows (Test 12), corrections survive reimport, rollback, masking, size limits,
   malformed CSVs.
 - `test_finance_ledger_math.py`: category totals, effective-dated target lookup,
-  coverage gaps (Test 13), no zero-denominator percentages.
+  coverage gaps (Test 13), data-quality status, uncategorized $400 counted in known
+  spending, affordability line and its validated/provisional/incomplete label,
+  no zero-denominator percentages.
 - `test_finance_budget_routes.py`: MFA gate and CSRF on every new route, no-store
   headers, upgrade-needed state (Test 18), and the main flows end to end.
 - A migration test: an existing snapshot-era DB upgrades additively and keeps its data.
 
 ## Out of scope for Phase 1
 
-Rollover math, sinking-fund balances, recurring commitments, forecasts, weekly
-review, closes, exports, merchant rules, SimpleFIN transactions, AI categorization.
+Rollover math, sinking-fund balances, reserve funding, cash forecasts, exports
+(Phase 2); recurring commitments, savings actuals, HSA measures (Phase 3); weekly
+review, closes, reports (Phase 4); merchant rules, SimpleFIN transactions, AI (Phase 5).
