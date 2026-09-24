@@ -85,8 +85,9 @@ def _summary(conn, month, today):
             "WHERE t.txn_date BETWEEN ? AND ? AND t.status IN ('posted','pending')", (start.isoformat(), end.isoformat())):
         allocations.setdefault(line['txn_id'], []).append(line)
 
-    direct = {}  # category_id -> {'posted': D, 'pending': D}
-    known = {'posted': ZERO, 'pending': ZERO}
+    direct = category_spending(conn, month)
+    known = {'posted': sum((d['posted'] for d in direct.values()), ZERO),
+             'pending': sum((d['pending'] for d in direct.values()), ZERO)}
     uncategorized = {'count': 0, 'amount': ZERO}
     inflows = {'count': 0, 'amount': ZERO}
     other = {}
@@ -118,14 +119,8 @@ def _summary(conn, month, today):
                 inflows['count'] += 1
                 inflows['amount'] += amount
             continue
-        for line in lines:
-            value = Decimal(line['amount'])
-            if txn['kind'] == 'income':
-                income += value
-            elif txn['kind'] in SPENDING_KINDS:
-                slot = direct.setdefault(line['category_id'], {'posted': ZERO, 'pending': ZERO})
-                slot[bucket] -= value
-                known[bucket] -= value
+        if txn['kind'] == 'income':
+            income += sum((Decimal(line['amount']) for line in lines), ZERO)
 
     if not insufficient:
         if uncategorized['count']:
@@ -190,7 +185,73 @@ def _summary(conn, month, today):
     plan = dict(income=plan['income'], outflows=plan['outflows'], surplus=plan['income'] - plan['outflows'],
                 label=label, unvalidated=plan['unvalidated'], missing=plan['missing'])
 
-    return dict(month=month, currency=currency, coverage=coverage, quality=quality, quality_reasons=reasons,
+    return dict(month=month, currency=currency, coverage=coverage, allowances=allowances(conn, month, today), quality=quality, quality_reasons=reasons,
                 known_spending=dict(posted=known['posted'], pending=known['pending'], total=known['posted'] + known['pending']),
                 uncategorized=uncategorized, unreviewed_inflows=inflows, income=income, categories=rows, plan=plan,
                 other_currencies={k: v for k, v in other.items() if v})
+
+
+def category_spending(conn, month):
+    """Direct spending per category for the month, net of refunds, primary currency only."""
+    start, end = _month_bounds(month)
+    result = {}
+    for line in conn.execute(
+            "SELECT a.category_id, a.amount, t.status FROM finance_txn_allocations a JOIN finance_txns t ON t.id=a.txn_id "
+            "WHERE t.txn_date BETWEEN ? AND ? AND t.status IN ('posted','pending') AND t.kind IN ('expense','refund','reimbursement') "
+            "AND t.currency=?", (start.isoformat(), end.isoformat(), finance_budget.primary_currency(conn))):
+        slot = result.setdefault(line['category_id'], {'posted': ZERO, 'pending': ZERO})
+        slot[line['status']] -= Decimal(line['amount'])
+    return result
+
+
+def _next_month(month):
+    year, number = int(month[:4]), int(month[5:])
+    return f'{year + number // 12}-{number % 12 + 1:02d}'
+
+
+def allowances(conn, month, today):
+    """Available and remaining amounts for monthly capped categories, with rollover.
+
+    The chain starts at the budget start month (or the requested month, if earlier) and
+    restarts after any month without a target, so there is never a fake remaining figure.
+    """
+    month = finance_budget._month(month)
+    start = (finance_budget.get_setting(conn, 'budget_start') or '')[:7]
+    months = [month]
+    if start and start < month:
+        months, cursor = [], start
+        while cursor <= month:
+            months.append(cursor)
+            cursor = _next_month(cursor)
+    spending = {m: category_spending(conn, m) for m in months}
+    every = finance_budget.categories(conn)
+    children = {}
+    for category in every:
+        if category['parent_id'] is not None:
+            children.setdefault(category['parent_id'], []).append(category['id'])
+    rows = []
+    for category in every:
+        if category['type'] != 'capped' or not category['active'] or category['parent_id'] is not None:
+            continue
+        ids = [category['id']] + children.get(category['id'], [])
+        cap = Decimal(category['rollover_cap']) if category['rollover_cap'] else None
+        previous = None
+        for index, current in enumerate(months):
+            target = finance_budget.target_for(conn, category['id'], current)
+            spent = sum((spending[current].get(i, {}).get('posted', ZERO) + spending[current].get(i, {}).get('pending', ZERO)
+                         for i in ids), ZERO)
+            if target is None:
+                row = dict(target=None, carry_in=None, available=None, remaining=None, pct_used=None, no_target=True)
+                previous = None
+            else:
+                amount = target['amount']
+                carry = ZERO
+                if index and previous is not None and category['rollover'] != 'reset':
+                    carry = previous if category['rollover'] == 'carry' or cap is None else min(cap, amount + previous) - amount
+                available = amount + carry
+                remaining = available - spent
+                pct = int((spent * 100 / available).quantize(Decimal('1'), rounding=ROUND_HALF_UP)) if available > 0 else None
+                row = dict(target=amount, carry_in=carry, available=available, remaining=remaining, pct_used=pct, no_target=False)
+                previous = remaining
+        rows.append(dict(row, id=category['id'], name=category['name'], rollover=category['rollover'], cap=cap, spent=spent))
+    return rows
