@@ -204,3 +204,81 @@ def test_card_payment_match_not_repeated_as_transfer(budget_app):
     page = app.test_client().get(f'/finance/transactions/{out}').data
     assert page.count(f'name="other_id" value="{inn}"'.encode()) == 1
     assert b'Possible card payment matches' in page and b'Possible transfer matches' not in page
+
+
+P2_GETS = ['/finance/funds', '/finance/forecast', '/finance/commitments',
+           '/finance/exports/transactions.csv?month=2026-10', '/finance/exports/categories.csv?month=2026-10']
+P2_POSTS = ['/finance/funds/movements', '/finance/commitments', '/finance/budget/settings/limits']
+
+
+def test_phase2_routes_are_gated_and_private(budget_app):
+    app, _ = budget_app
+    client = app.test_client()
+    for url in P2_POSTS:
+        assert client.post(url, data={}).status_code == 400, url
+    for url in P2_GETS:
+        r = client.get(url)
+        assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-store', url
+    r = client.get('/finance/exports/transactions.csv?month=2026-10')
+    assert r.mimetype == 'text/csv' and 'attachment' in r.headers['Content-Disposition']
+    assert 'transactions-2026-10.csv' in r.headers['Content-Disposition']
+
+
+def test_phase2_routes_require_real_mfa(app, tmp_path):
+    app.config.update(FINANCE_ENABLED=True, FINANCE_DB_PATH=str(tmp_path / 'private' / 'finance.db'))
+    client = app.test_client()
+    for url in P2_GETS:
+        assert '/login' in client.get(url).location, url
+    for url in P2_POSTS:
+        assert '/login' in client.post(url, data={}).location, url
+
+
+def test_fund_movement_and_dashboard(budget_app):
+    app, path = budget_app
+    client = app.test_client()
+    token = csrf(client)
+    conn = finance_store.connect(str(path))
+    travel = conn.execute("SELECT id FROM finance_budget_categories WHERE name='Travel'").fetchone()['id']
+    conn.close()
+    r = client.post('/finance/funds/movements', data={'csrf_token': token, 'category_id': travel, 'kind': 'opening',
+                                                      'amount': '1200', 'movement_date': '2026-09-01', 'note': ''})
+    assert r.status_code == 302
+    page = client.get('/finance/funds').data
+    assert b'1,200.00' in page and b'Setup needed' in page
+    bad = client.post('/finance/funds/movements', data={'csrf_token': token, 'category_id': travel, 'kind': 'contribution',
+                                                        'amount': '-5', 'movement_date': '2026-09-01', 'note': ''})
+    assert bad.status_code == 400 and b'positive amount' in bad.data
+    dash = client.get('/finance/budget').data
+    for text in [b'Remaining category budget', b'Projected cash after commitments', b'Available cash', b'Savings progress']:
+        assert text in dash
+
+
+def test_commitment_form_and_bad_month_export(budget_app):
+    app, _ = budget_app
+    client = app.test_client()
+    token = csrf(client)
+    r = client.post('/finance/commitments', data={'csrf_token': token, 'name': 'Paycheck', 'direction': 'in', 'amount': '3000',
+                                                  'amount_kind': 'exact', 'cadence': 'biweekly', 'next_date': '2026-10-02',
+                                                  'end_date': '', 'account_id': CHECKING, 'category_id': '', 'status': 'active',
+                                                  'notes': ''})
+    assert r.status_code == 302
+    assert b'Paycheck' in client.get('/finance/commitments').data
+    assert client.get('/finance/exports/transactions.csv?month=bad').status_code == 400
+    assert client.get('/finance/exports/transactions.csv').status_code == 400
+
+
+def test_limits_settings(budget_app):
+    app, _ = budget_app
+    client = app.test_client()
+    token = csrf(client)
+    assert client.post('/finance/budget/settings/limits', data={'csrf_token': token, 'checking_minimum': '1000',
+                                                                'reserve_holds': ''}).status_code == 302
+    assert b'1000.00' in client.get('/finance/budget/settings').data
+    assert client.post('/finance/budget/settings/limits', data={'csrf_token': token, 'checking_minimum': 'abc',
+                                                                'reserve_holds': ''}).status_code == 400
+
+
+def test_forecast_page_lists_undated_commitments(budget_app):
+    app, _ = budget_app
+    page = app.test_client().get('/finance/forecast').data
+    assert b'Mortgage' in page and b'need a date' in page

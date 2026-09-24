@@ -1,0 +1,27 @@
+{% extends "finance_budget_base.html" %}
+{% block page_title %}Cash forecast{% endblock %}
+{% block heading %}What checking will look like{% endblock %}
+{% block intro %}<p class="finance-intro">Starts from the synced checking balance and applies dated paydays, bills and card payments. Card purchases are never subtracted twice: they reach checking only through the card payment.</p>{% endblock %}
+{% block actions %}<div class="budget-actions"><a class="btn" href="{{ url_for('finance_commitments') }}">Bills &amp; paydays</a></div>{% endblock %}
+{% block budget_content %}
+{% set state_label = {'ok': 'Complete', 'provisional': 'Incomplete', 'unknown': 'Unknown'}[f.state] %}
+<section class="budget-quality budget-quality--{{ {'ok': 'complete', 'provisional': 'provisional', 'unknown': 'insufficient'}[f.state] }}" aria-labelledby="fc-title">
+  <h2 id="fc-title"><span class="budget-pill budget-pill--{{ {'ok': 'complete', 'provisional': 'provisional', 'unknown': 'insufficient'}[f.state] }}">{{ state_label }}</span> Forecast through {{ f.end_date }}</h2>
+  {% if f.reasons %}<ul>{% for r in f.reasons %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
+</section>
+{% if f.start_balance is not none %}
+<section class="ledger-summary budget-summary" aria-label="Forecast totals">
+  <article><span class="finance-label">Checking now</span><strong>{{ f.start_balance|finance_amount }}</strong><span>{{ f.accounts|join(', ') }} · as of {{ f.as_of }}</span></article>
+  <article><span class="finance-label">Lowest point</span><strong class="{{ 'budget-over' if f.below_minimum }}">{{ (f.lowest.balance if f.lowest else f.start_balance)|finance_amount }}</strong><span>{{ ('on ' ~ f.lowest.date) if f.lowest else 'No dated items' }}{% if f.minimum %} · minimum {{ f.minimum|finance_amount }}{% endif %}</span></article>
+  <article><span class="finance-label">On {{ f.end_date }}</span><strong>{{ f.end_balance|finance_amount }}</strong><span>Projected cash after commitments</span></article>
+</section>
+{% if f.events %}<div class="finance-table-wrap"><table class="ledger-table"><thead><tr><th scope="col">Date</th><th scope="col">Item</th><th scope="col" class="number">Amount</th><th scope="col" class="number">Checking after</th></tr></thead><tbody>
+{% for e in f.events %}<tr class="{{ 'budget-row--risk' if e.running < f.minimum }}"><td>{{ e.date }}</td><th scope="row">{{ e.label }}</th><td class="number {{ 'budget-in' if e.amount > 0 }}">{{ e.amount|finance_amount }}</td><td class="number"><strong>{{ e.running|finance_amount }}</strong></td></tr>{% endfor %}
+</tbody></table></div>{% else %}<p class="ledger-empty-group">No dated paydays, bills or card payments in this window yet.</p>{% endif %}
+{% endif %}
+{% if f.past_due %}<section class="ledger-section" aria-labelledby="past-title"><header class="ledger-section-title"><h2 id="past-title">Date passed: confirm</h2><span>Not in the projection. The balance may already include them.</span></header>
+  <ul class="budget-links">{% for p in f.past_due %}<li>{{ p.date }} · {{ p.label }} · {{ p.amount|finance_amount }}</li>{% endfor %}</ul>
+  <p class="finance-help">Card payments: update their status in <a href="{{ url_for('finance') }}#payments">Upcoming card payments</a>.</p></section>{% endif %}
+{% if f.needs_date %}<section class="ledger-section" aria-labelledby="needs-title"><header class="ledger-section-title"><h2 id="needs-title">These need a date or account</h2><span>Left out of the forecast until they have one</span></header>
+  <p>{{ f.needs_date|length }} bills and paydays need a date or account: {{ f.needs_date|join(', ') }}. <a href="{{ url_for('finance_commitments') }}">Add the dates</a>.</p></section>{% endif %}
+{% endblock %}

@@ -9,13 +9,18 @@ from contextlib import contextmanager
 from datetime import date, timedelta
 from functools import wraps
 
-from flask import abort, redirect, render_template, request, url_for
+from flask import Response, abort, redirect, render_template, request, url_for
 from flask_login import current_user
 
 import finance_budget
+import finance_cashflow
+import finance_export
+import finance_funds
+import finance_health
 import finance_import
 import finance_ledger
-import finance_ledger_math
+import finance_recurring
+from finance_book import _transaction
 from finance_store import FinanceStoreError, _utc
 
 ROLES = {'checking': 'Checking', 'savings': 'Savings', 'reserve': 'Reserve', 'card': 'Credit card', 'hsa': 'HSA',
@@ -125,8 +130,8 @@ def register(app):
     def budget_month():
         month = _month_or_400(request.args.get('month') or _today().strftime('%Y-%m'))
         with budget_db() as conn:
-            summary = finance_ledger_math.month_summary(conn, month, _today())
-        return render_template('finance_budget.html', active='finance', tab='budget', s=summary,
+            dashboard = finance_health.dashboard(conn, month, _today())
+        return render_template('finance_budget.html', active='finance', tab='budget', d=dashboard, s=dashboard['summary'],
                                prev_month=_shift(month, -1), next_month=_shift(month, 1))
 
     # ---- Transactions -----------------------------------------------------
@@ -370,6 +375,86 @@ def register(app):
             return import_page(batch_id, str(error), 400)
         return redirect(url_for('finance_imports'))
 
+    # ---- Funds ------------------------------------------------------------
+
+    def funds_page(error=None, status=200):
+        month = _today().strftime('%Y-%m')
+        with budget_db() as conn:
+            funds = finance_funds.funds(conn, month)
+            return render_template('finance_funds.html', active='finance', tab='funds', error=error, funds=funds,
+                                   reserve=finance_funds.reserve_status(conn), history=finance_funds.movements(conn),
+                                   month=month, today=_today().isoformat()), status
+
+    @route('/finance/funds', 'finance_funds')
+    def funds():
+        return funds_page()
+
+    @route('/finance/funds/movements', 'finance_fund_movement', methods=('POST',))
+    def fund_movement():
+        form = request.form
+        try:
+            with budget_db(write=True) as conn:
+                finance_funds.record_movement(conn, category_id=form.get('category_id', ''), kind=form.get('kind', ''),
+                                              amount=form.get('amount', ''), movement_date=form.get('movement_date', ''),
+                                              note=form.get('note', ''), actor=actor(), today=_today())
+        except FinanceStoreError as error:
+            return funds_page(str(error), 400)
+        return redirect(url_for('finance_funds'))
+
+    # ---- Forecast and commitments -------------------------------------------
+
+    @route('/finance/forecast', 'finance_forecast')
+    def forecast():
+        with budget_db() as conn:
+            result = finance_cashflow.forecast(conn, _today())
+        return render_template('finance_forecast.html', active='finance', tab='forecast', f=result)
+
+    def commitments_page(error=None, status=200):
+        with budget_db() as conn:
+            return render_template('finance_commitments.html', active='finance', tab='forecast', error=error,
+                                   commitments=finance_recurring.commitments(conn), accounts=accounts(conn, included_only=True),
+                                   categories=finance_budget.categories(conn, active_only=True),
+                                   cadences=finance_recurring.CADENCES, kinds=finance_recurring.AMOUNT_KINDS,
+                                   statuses=finance_recurring.STATUSES), status
+
+    @route('/finance/commitments', 'finance_commitments', methods=('GET', 'POST'))
+    def commitments():
+        if request.method == 'GET':
+            return commitments_page()
+        form = request.form
+        try:
+            with budget_db(write=True) as conn:
+                finance_recurring.save_commitment(
+                    conn, commitment_id=form.get('commitment_id') or None, name=form.get('name', ''),
+                    direction=form.get('direction', ''), amount=form.get('amount', ''), amount_kind=form.get('amount_kind', ''),
+                    cadence=form.get('cadence', ''), next_date=form.get('next_date', ''), end_date=form.get('end_date', ''),
+                    account_id=form.get('account_id', ''), category_id=form.get('category_id', ''),
+                    status=form.get('status', 'active'), notes=form.get('notes', ''), actor=actor())
+        except FinanceStoreError as error:
+            return commitments_page(str(error), 400)
+        return redirect(url_for('finance_commitments'))
+
+    # ---- Exports ------------------------------------------------------------
+
+    def export(kind, build):
+        month = request.args.get('month', '')
+        try:
+            finance_budget._month(month)
+        except FinanceStoreError:
+            abort(400, description='Choose a month as YYYY-MM.')
+        with budget_db() as conn:
+            body = build(conn, month)
+        return Response(body, mimetype='text/csv',
+                        headers={'Content-Disposition': f'attachment; filename="{kind}-{month}.csv"'})
+
+    @route('/finance/exports/transactions.csv', 'finance_export_transactions')
+    def export_transactions():
+        return export('transactions', finance_export.transactions_csv)
+
+    @route('/finance/exports/categories.csv', 'finance_export_categories')
+    def export_categories():
+        return export('categories', lambda conn, month: finance_export.categories_csv(conn, month, _today()))
+
     # ---- Settings ---------------------------------------------------------
 
     def settings_page(error=None, status=200):
@@ -382,7 +467,8 @@ def register(app):
             for row in conn.execute('SELECT account_id, MIN(start_date) AS first, MAX(end_date) AS last, COUNT(*) AS spans '
                                     'FROM finance_coverage GROUP BY account_id'):
                 coverage[row['account_id']] = dict(row)
-            return render_template('finance_budget_settings.html', active='finance', tab='settings', error=error,
+            limits = {key: finance_budget.money_setting(conn, key) for key in finance_budget.MONEY_SETTINGS}
+            return render_template('finance_budget_settings.html', active='finance', tab='settings', error=error, limits=limits,
                                    people=finance_budget.people(conn), accounts=accounts(conn), coverage=coverage,
                                    categories=categories, month=month, today=_today().isoformat(),
                                    roles=ROLES, types=TYPES), status
@@ -413,6 +499,10 @@ def register(app):
                     finance_budget.set_target(conn, category_id=form.get('category_id', ''),
                                               effective_month=form.get('effective_month', ''), amount=form.get('amount', ''),
                                               basis=form.get('basis', ''), note=form.get('note', ''), actor=actor())
+                elif section == 'limits':
+                    with _transaction(conn):
+                        for key in finance_budget.MONEY_SETTINGS:
+                            finance_budget.set_money_setting(conn, key, form.get(key, ''))
                 elif section == 'coverage':
                     finance_budget.declare_coverage(conn, account_id=form.get('account_id', ''), start=form.get('start', ''),
                                                     end=form.get('end', ''), actor=actor())
