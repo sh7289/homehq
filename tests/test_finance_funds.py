@@ -26,6 +26,12 @@ def full_db(tmp_path, checking='4000', savings='5000', hsa='3000', balance_at='2
     finance_store.record_sync(conn, {'accounts': [dict(id=i, label=l, currency='USD', balance=Decimal(b), balance_at=balance_at)
                                                   for i, l, b in accounts], 'warnings': [], 'complete': True},
                               now=datetime(2026, 10, 15, 12, tzinfo=timezone.utc))
+    # ledger_db's accounts carry a later balance date, so pin these balances directly.
+    for account_id, _, balance in accounts:
+        conn.execute('UPDATE finance_accounts SET balance=?, balance_at=? WHERE id=?', (balance, balance_at, account_id))
+    conn.execute('UPDATE finance_accounts SET group_id=5 WHERE id IN (?, ?)', (CARD_S, CARD_H))
+    conn.execute('UPDATE finance_accounts SET group_id=1 WHERE id IN (?, ?, ?)', (CHECKING, SAVINGS, HSA))
+    conn.commit()
     B.set_account(conn, SAVINGS, included=True, role='savings')
     B.set_account(conn, HSA, included=True, role='hsa')
     return conn

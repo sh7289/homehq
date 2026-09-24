@@ -123,9 +123,13 @@ NULL, status (active|paused|ended), notes, created_by, created_at, updated_by, u
 - **Result:** a dated timeline with a running balance, the lowest point and its date,
   the first date below `checking_minimum` (a settings value, default 0), and the
   ending balance.
-- **Past-due items:** occurrences and payments dated on or before the as-of date
-  that haven't been confirmed are listed as "date passed: confirm". They stay out of
-  the projection, because the balance may already include them.
+- **Past-due items:** these are listed as "date passed: confirm" and kept out of the
+  projection, because the balance may already include them:
+  - planned or scheduled card payments dated on or before the as-of date (they carry
+    an explicit status to update)
+  - commitment occurrences in the 7 days up to the as-of date (older ones are assumed
+    settled).
+  Commitments without a date or an account are listed under "needs a date or account".
 
 **Available cash** = the checking start balance − `checking_minimum`.
 **Projected cash after commitments** = the forecast's ending balance.
