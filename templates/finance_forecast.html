@@ -22,6 +22,8 @@
 {% if f.past_due %}<section class="ledger-section" aria-labelledby="past-title"><header class="ledger-section-title"><h2 id="past-title">Date passed: confirm</h2><span>Not in the projection. The balance may already include them.</span></header>
   <ul class="budget-links">{% for p in f.past_due %}<li>{{ p.date }} · {{ p.label }} · {{ p.amount|finance_amount }}</li>{% endfor %}</ul>
   <p class="finance-help">Card payments: update their status in <a href="{{ url_for('finance') }}#payments">Upcoming card payments</a>.</p></section>{% endif %}
+{% if ending %}<section class="ledger-section" aria-labelledby="ending-title"><header class="ledger-section-title"><h2 id="ending-title">Financing ending</h2><span>Budgets don’t change automatically when a payment ends</span></header>
+  <ul class="budget-links">{% for e in ending %}<li>{{ e.name }} · last payment {{ e.end_date }}{% if e.past %} · <strong>date passed: mark it ended in <a href="{{ url_for('finance_commitments') }}">Bills &amp; paydays</a></strong>{% endif %}</li>{% endfor %}</ul></section>{% endif %}
 {% if f.needs_date %}<section class="ledger-section" aria-labelledby="needs-title"><header class="ledger-section-title"><h2 id="needs-title">These need a date or account</h2><span>Left out of the forecast until they have one</span></header>
   <p>{{ f.needs_date|length }} bills and paydays need a date or account: {{ f.needs_date|join(', ') }}. <a href="{{ url_for('finance_commitments') }}">Add the dates</a>.</p></section>{% endif %}
 {% endblock %}

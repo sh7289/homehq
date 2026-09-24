@@ -287,3 +287,89 @@ def test_forecast_page_lists_undated_commitments(budget_app):
 def test_dashboard_says_what_forecast_leaves_out(budget_app):
     app, _ = budget_app
     assert b'a month of undated bills' in app.test_client().get('/finance/budget').data
+
+
+P3_POSTS = ['/finance/transactions/1/match', '/finance/matches/1/unmatch', '/finance/funds/goals', '/finance/bonus']
+
+
+def test_phase3_routes_gated(budget_app):
+    app, _ = budget_app
+    client = app.test_client()
+    for url in P3_POSTS:
+        assert client.post(url, data={}).status_code == 400, url
+    r = client.get('/finance/bonus?amount=1000')
+    assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-store'
+
+
+def test_phase3_real_mfa(app, tmp_path):
+    app.config.update(FINANCE_ENABLED=True, FINANCE_DB_PATH=str(tmp_path / 'private' / 'finance.db'))
+    client = app.test_client()
+    assert '/login' in client.get('/finance/bonus').location
+    for url in P3_POSTS:
+        assert '/login' in client.post(url, data={}).location, url
+
+
+def test_bonus_page_writes_nothing_and_shows_split(budget_app):
+    app, path = budget_app
+    client = app.test_client()
+    page = client.get('/finance/bonus?amount=10000').data
+    assert b'3,500.00' in page and b'2,500.00' in page
+    conn = finance_store.connect(str(path))
+    assert conn.execute('SELECT COUNT(*) FROM finance_fund_movements').fetchone()[0] == 0
+    conn.close()
+    bad = client.get('/finance/bonus?amount=10000&share_0=50&share_1=25&share_2=15&share_3=10&share_4=15').data
+    assert b'add up to 100' in bad
+
+
+def test_bonus_record_only_ticked(budget_app):
+    app, path = budget_app
+    client = app.test_client()
+    token = csrf(client)
+    conn = finance_store.connect(str(path))
+    travel = conn.execute("SELECT id FROM finance_budget_categories WHERE name='Travel'").fetchone()['id']
+    conn.close()
+    client.post('/finance/funds/movements', data={'csrf_token': token, 'category_id': travel, 'kind': 'opening',
+                                                  'amount': '0', 'movement_date': '2026-09-01', 'note': ''})
+    # Every amount box is submitted (no JavaScript), but only the ticked line is recorded.
+    r = client.post('/finance/bonus', data={'csrf_token': token, 'line': ['1'], 'amount_1': '2500', 'amount_2': '999',
+                                            'amount_3': '888', 'amount_4': '777'})
+    assert r.status_code == 302
+    page = client.get('/finance/funds').data
+    assert b'2,500.00' in page and b'999' not in page
+
+
+def test_match_flow_via_detail(budget_app):
+    app, path = budget_app
+    client = app.test_client()
+    token = csrf(client)
+    conn = finance_store.connect(str(path))
+    import finance_recurring as R
+    import finance_ledger as L
+    conn.execute('DELETE FROM finance_recurring')
+    conn.commit()
+    rid = R.save_commitment(conn, name='Water', direction='out', amount='130', amount_kind='estimate', cadence='monthly',
+                            next_date='2026-09-10', end_date='', account_id=CHECKING, category_id='', status='active',
+                            notes='', actor='s')
+    t = L.create_txn(conn, account_id=CHECKING, txn_date='2026-09-11', amount='-128', description='CITY WATER', actor='s')
+    conn.close()
+    assert b'Expected bill or payday' in client.get(f'/finance/transactions/{t}').data
+    r = client.post(f'/finance/transactions/{t}/match', data={'csrf_token': token, 'recurring_id': rid,
+                                                                'occurrence_date': '2026-09-10'})
+    assert r.status_code == 302
+    detail = client.get(f'/finance/transactions/{t}').data
+    assert b'Unmatch' in detail
+    assert b'128.00' in client.get('/finance/commitments').data
+
+
+def test_goal_form(budget_app):
+    app, path = budget_app
+    client = app.test_client()
+    token = csrf(client)
+    conn = finance_store.connect(str(path))
+    xmas = conn.execute("SELECT id FROM finance_budget_categories WHERE name='Gifts and Christmas'").fetchone()['id']
+    conn.close()
+    r = client.post('/finance/funds/goals', data={'csrf_token': token, 'category_id': xmas, 'target_amount': '1500',
+                                                  'target_date': '2026-12-24', 'expected_reimbursements': '', 'note': 'All gifts'})
+    assert r.status_code == 302
+    page = client.get('/finance/funds').data
+    assert b'1,500.00' in page and b'All gifts' in page

@@ -12,6 +12,7 @@ from functools import wraps
 from flask import Response, abort, redirect, render_template, request, url_for
 from flask_login import current_user
 
+import finance_bonus
 import finance_budget
 import finance_cashflow
 import finance_export
@@ -20,6 +21,7 @@ import finance_health
 import finance_import
 import finance_ledger
 import finance_recurring
+import finance_savings
 from finance_book import _transaction
 from finance_store import FinanceStoreError, _utc
 
@@ -212,7 +214,10 @@ def register(app):
             payments = [dict(r) for r in conn.execute(
                 "SELECT id, payment_date, amount FROM finance_payments WHERE status IN ('planned','scheduled','paid') "
                 'ORDER BY payment_date DESC LIMIT 20')]
+            expected = finance_recurring.txn_match(conn, txn['id'])
+            expected_candidates = [] if expected else finance_recurring.match_candidates(conn, txn['id'])
             return render_template('finance_txn.html', active='finance', tab='transactions', txn=txn, lines=lines,
+                                   expected=expected, expected_candidates=expected_candidates,
                                    kind=request.form.get('kind', kind) if request.method == 'POST' else kind,
                                    categories=[c for c in finance_budget.categories(conn, active_only=True) if c['type'] != 'transfer'],
                                    people=['shared'] + finance_budget.people(conn), candidates=candidates, payments=payments,
@@ -266,6 +271,25 @@ def register(app):
         except FinanceStoreError as error:
             return detail(txn_id, str(error), 400)
         return after_edit(txn_id)
+
+    @route('/finance/transactions/<int:txn_id>/match', 'finance_txn_match', methods=('POST',))
+    def txn_match(txn_id):
+        try:
+            with budget_db(write=True) as conn:
+                finance_recurring.match(conn, recurring_id=request.form.get('recurring_id', ''),
+                                        occurrence_date=request.form.get('occurrence_date', ''), txn_id=txn_id, actor=actor())
+        except FinanceStoreError as error:
+            return detail(txn_id, str(error), 400)
+        return redirect(url_for('finance_txn', txn_id=txn_id))
+
+    @route('/finance/matches/<int:match_id>/unmatch', 'finance_txn_unmatch', methods=('POST',))
+    def txn_unmatch(match_id):
+        try:
+            with budget_db(write=True) as conn:
+                row = finance_recurring.unmatch(conn, match_id, actor())
+        except FinanceStoreError:
+            abort(404)
+        return redirect(url_for('finance_txn', txn_id=row['txn_id']))
 
     @route('/finance/links/<int:link_id>/unlink', 'finance_txn_unlink', methods=('POST',))
     def txn_unlink(link_id):
@@ -389,6 +413,60 @@ def register(app):
     def funds():
         return funds_page()
 
+    @route('/finance/funds/goals', 'finance_fund_goal', methods=('POST',))
+    def fund_goal():
+        form = request.form
+        try:
+            with budget_db(write=True) as conn:
+                finance_funds.set_goal(conn, category_id=form.get('category_id', ''), target_amount=form.get('target_amount', ''),
+                                       target_date=form.get('target_date', ''),
+                                       expected_reimbursements=form.get('expected_reimbursements', ''),
+                                       note=form.get('note', ''), actor=actor())
+        except FinanceStoreError as error:
+            return funds_page(str(error), 400)
+        return redirect(url_for('finance_funds'))
+
+    def bonus_page(error=None, status=200):
+        today = _today()
+        args = request.args
+        shares = [args.get(f'share_{i}', str(default)) for i, (_, _, default) in enumerate(finance_bonus.DEFAULT_SHARES)]
+        proposal = problem = None
+        with budget_db() as conn:
+            income = finance_bonus.recent_income(conn, today)
+            amount_text = args.get('amount', '')
+            if args.get('txn_id'):
+                picked = next((i for i in income if str(i['id']) == args['txn_id']), None)
+                amount_text = str(picked['amount']) if picked else amount_text
+            if amount_text:
+                try:
+                    amount = finance_budget.parse_money(amount_text, signed=False)
+                    parsed = [int(x) if x.strip().lstrip('-').isdigit() else None for x in shares]
+                    if None in parsed:
+                        raise FinanceStoreError('The shares must be whole numbers that add up to 100.')
+                    proposal = finance_bonus.propose(amount, parsed)
+                except FinanceStoreError as issue:
+                    problem = str(issue)
+            funds = finance_funds.funds(conn, today.strftime('%Y-%m'), today=today)
+            return render_template('finance_bonus.html', active='finance', tab='funds', error=error, problem=problem,
+                                   proposal=proposal, shares=shares, defaults=finance_bonus.DEFAULT_SHARES, income=income,
+                                   amount=amount_text, funds={f['name']: f for f in funds},
+                                   reserve=finance_funds.reserve_status(conn),
+                                   savings=finance_savings.progress(conn, today.strftime('%Y-%m'), today)), status
+
+    @route('/finance/bonus', 'finance_bonus', methods=('GET', 'POST'))
+    def bonus():
+        if request.method == 'GET':
+            return bonus_page()
+        keys = [key for key, _, _ in finance_bonus.DEFAULT_SHARES]
+        ticked = [i for i in request.form.getlist('line') if i.isdigit() and int(i) < len(keys)]
+        lines = [dict(key=keys[int(i)], amount=request.form.get(f'amount_{i}', '')) for i in ticked]
+        try:
+            with budget_db(write=True) as conn:
+                finance_bonus.record(conn, lines=lines, actor=actor(), today=_today())
+        except FinanceStoreError as error:
+            return bonus_page(str(error), 400)
+        return redirect(url_for('finance_funds'))
+
     @route('/finance/funds/movements', 'finance_fund_movement', methods=('POST',))
     def fund_movement():
         form = request.form
@@ -407,12 +485,14 @@ def register(app):
     def forecast():
         with budget_db() as conn:
             result = finance_cashflow.forecast(conn, _today())
-        return render_template('finance_forecast.html', active='finance', tab='forecast', f=result)
+            ending = finance_recurring.ending_soon(conn, _today())
+        return render_template('finance_forecast.html', active='finance', tab='forecast', f=result, ending=ending)
 
     def commitments_page(error=None, status=200):
         with budget_db() as conn:
             return render_template('finance_commitments.html', active='finance', tab='forecast', error=error,
                                    commitments=finance_recurring.commitments(conn), accounts=accounts(conn, included_only=True),
+                                   actuals=finance_recurring.latest_actuals(conn),
                                    categories=finance_budget.categories(conn, active_only=True),
                                    cadences=finance_recurring.CADENCES, kinds=finance_recurring.AMOUNT_KINDS,
                                    statuses=finance_recurring.STATUSES), status

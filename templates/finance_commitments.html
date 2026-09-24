@@ -17,12 +17,12 @@
   <label>Status<select name="status">{% for k in statuses %}<option value="{{ k }}" {{ 'selected' if (c and c.status == k) or (not c and k == 'active') }}>{{ k }}</option>{% endfor %}</select></label>
   <label>Notes<input name="notes" maxlength="300" value="{{ c.notes if c }}"></label>
 {% endmacro %}
-<div class="finance-table-wrap"><table class="ledger-table"><thead><tr><th scope="col">Name</th><th scope="col" class="number">Amount</th><th scope="col">Repeats</th><th scope="col">Next</th><th scope="col">Account</th><th scope="col">Status</th></tr></thead><tbody>
+<div class="finance-table-wrap"><table class="ledger-table"><thead><tr><th scope="col">Name</th><th scope="col" class="number">Amount</th><th scope="col">Repeats</th><th scope="col">Next</th><th scope="col">Account</th><th scope="col">Last actual</th><th scope="col">Status</th></tr></thead><tbody>
 {% for c in commitments %}<tr><th scope="row"><a href="#commitment-{{ c.id }}">{{ c.name }}</a>{% if c.notes %}<br><small>{{ c.notes }}</small>{% endif %}</th>
   <td class="number {{ 'budget-in' if c.direction == 'in' }}">{{ '+' if c.direction == 'in' else '−' }}{{ c.amount|finance_amount }}<small class="budget-basis">{{ c.amount_kind }}</small></td>
   <td>{{ c.cadence }}{% if c.end_date %}<br><small>until {{ c.end_date }}</small>{% endif %}</td>
   <td>{% if c.next_date %}{{ c.next_date }}{% else %}<span class="budget-pill budget-pill--attention">Needs a date</span>{% endif %}</td>
-  <td>{{ c.account_name or '—' }}</td><td>{{ c.status }}</td></tr>{% endfor %}
+  <td>{{ c.account_name or '—' }}</td><td>{% set a = actuals.get(c.id) %}{% if a %}{{ a.amount|finance_amount }}<br><small>{{ a.date }}</small>{% else %}<span class="ledger-unset">—</span>{% endif %}</td><td>{{ c.status }}</td></tr>{% endfor %}
 </tbody></table></div>
 <div class="ledger-tools">
   <details {% if error %}open{% endif %}><summary>Add a bill or payday</summary><form method="post" action="{{ url_for('finance_commitments') }}" class="ledger-form">{{ fields() }}<button class="btn btn--primary" type="submit">Add</button></form></details>

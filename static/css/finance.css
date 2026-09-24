@@ -423,3 +423,9 @@
   .budget-numbers { grid-template-columns: 1fr; }
   .budget-dimensions ul { grid-template-columns: 1fr; }
 }
+
+/* Budgeting phase 3 */
+.budget-goal { font-size: .85rem; margin: .2rem 0 .4rem; }
+.finance .budget-subhead { font: 500 1.1rem/1.3 Georgia, serif; margin: 1.5rem 0 .2rem; }
+.budget-bonus-form { margin-bottom: 1rem; }
+.budget-savings-line { margin-top: -.2rem; }

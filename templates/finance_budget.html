@@ -28,6 +28,7 @@
   <ul>{% for x in d.dimensions %}<li class="budget-dimension budget-dimension--{{ x.state }}"><span class="budget-pill budget-pill--dim-{{ x.state }}">{{ {'good': 'Good', 'attention': 'Attention', 'unknown': 'Unknown'}[x.state] }}</span><strong>{{ x.label }}</strong><span>{{ x.message }}</span></li>{% endfor %}</ul>
 </section>
 
+{% if d.savings.fund_allocations or d.savings.actual is not none %}<p class="finance-help budget-savings-line">{% if d.savings.actual is not none %}Added to savings accounts this month: <strong>{{ d.savings.actual|finance_amount }}</strong>{% if d.savings.planned is not none %} of {{ d.savings.planned|finance_amount }} planned{% endif %}. {% endif %}Set aside in funds: {{ d.savings.fund_allocations|finance_amount }} (an allocation, not savings).</p>{% endif %}
 {% set targeted = d.allowances|rejectattr('no_target')|list %}
 {% if targeted %}<section class="budget-allowances" aria-labelledby="allowances-title">
   <h2 id="allowances-title">Left to spend this month</h2>
@@ -54,6 +55,7 @@
   <article><span class="finance-label">Not yet categorized</span><strong>{{ s.uncategorized.amount|finance_amount }}</strong><span>{% if s.uncategorized.count %}<a href="{{ url_for('finance_transactions', month=s.month) }}">{{ s.uncategorized.count }} to review</a>{% else %}Nothing waiting{% endif %}</span></article>
   <article><span class="finance-label">Income recorded</span><strong>{{ s.income|finance_amount }}</strong><span>{% if s.unreviewed_inflows.count %}{{ s.unreviewed_inflows.amount|finance_amount }} in unreviewed deposits{% else %}Categorized as income{% endif %}</span></article>
 </section>
+{% if s.funding.hsa %}<p class="finance-help">Of {{ s.funding.total|finance_amount }} spending, {{ s.funding.hsa|finance_amount }} was paid from the HSA and {{ s.funding.everyday|finance_amount }} from everyday accounts.</p>{% endif %}
 <p class="finance-help">Known spending includes uncategorized purchases. Transfers and card payments are not spending: the purchases they pay for are counted when they happen.</p>
 
 <section class="budget-plan budget-plan--{{ s.plan.label }}" aria-labelledby="plan-title">
