@@ -61,3 +61,78 @@ def test_existing_snapshot_db_upgrades_additively(tmp_path):
     assert finance_budget.is_initialized(conn)
     assert conn.execute('SELECT COUNT(*) FROM finance_saved_snapshots').fetchone()[0] == 1
     assert conn.execute('SELECT COUNT(*) FROM finance_budget_targets').fetchone()[0] > 0
+
+
+import pytest
+from datetime import date
+from finance_store import FinanceStoreError
+
+
+def test_parse_money_formats():
+    import finance_budget as b
+    assert b.parse_money('$1,234.5') == Decimal('1234.50')
+    assert b.parse_money('(12.34)') == Decimal('-12.34')
+    assert b.parse_money('-0.10') == Decimal('-0.10')
+    for bad in ['1.234', 'abc', '', '1e5', 'NaN', '99999999999999', None]:
+        with pytest.raises(FinanceStoreError):
+            b.parse_money(bad)
+    with pytest.raises(FinanceStoreError):
+        b.parse_money('-1', signed=False)
+
+
+def test_mask_digits_hides_account_numbers():
+    import finance_budget as b
+    assert b.mask_digits('ZELLE TO 1234-5678-9012 ref') == 'ZELLE TO •••• ref'
+    assert b.mask_digits('COFFEE #12') == 'COFFEE #12'
+    assert b.mask_digits('a\x00b') == 'a b'
+
+
+def test_targets_are_effective_dated_and_past_is_immutable(tmp_path):
+    import finance_budget as b
+    conn = ledger_db(tmp_path)
+    dining = cat(conn, 'Shared dining and entertainment')
+    b.set_target(conn, category_id=dining, effective_month='2027-02', amount='700', basis='planning', note='', actor='alice', today=date(2026, 12, 5))
+    assert b.target_for(conn, dining, '2027-01')['amount'] == Decimal('650.00')
+    assert b.target_for(conn, dining, '2027-03')['amount'] == Decimal('700.00')
+    assert b.target_for(conn, dining, '2026-10') is None
+    with pytest.raises(FinanceStoreError):
+        b.set_target(conn, category_id=dining, effective_month='2026-11', amount='1', basis='planning', note='', actor='alice', today=date(2026, 12, 5))
+    with pytest.raises(FinanceStoreError):
+        b.set_target(conn, category_id=dining, effective_month='2027-13', amount='1', basis='planning', note='', actor='alice', today=date(2026, 12, 5))
+    b.set_target(conn, category_id=dining, effective_month='2027-02', amount='720', basis='historical', note='', actor='alice', today=date(2026, 12, 5))
+    assert b.target_for(conn, dining, '2027-02')['basis'] == 'historical'
+
+
+def test_category_rules(tmp_path):
+    import finance_budget as b
+    conn = ledger_db(tmp_path)
+    child = b.save_category(conn, name='Takeout', parent_id=cat(conn, 'Shared dining and entertainment'), type='capped')
+    with pytest.raises(FinanceStoreError):
+        b.save_category(conn, name='Too deep', parent_id=child, type='capped')
+    with pytest.raises(FinanceStoreError):
+        b.save_category(conn, name='Mystery', type='capped', default_person='Nobody')
+    with pytest.raises(FinanceStoreError):
+        b.save_category(conn, name='Capped no cap', type='capped', rollover='capped')
+    with pytest.raises(FinanceStoreError):
+        b.save_category(conn, name='Takeout', type='capped')
+    b.save_category(conn, category_id=child, name='Takeout & delivery', parent_id=cat(conn, 'Shared dining and entertainment'),
+                    type='capped', policy_includes='Family takeout', policy_excludes='Solo lunches')
+    names = [c['name'] for c in b.categories(conn)]
+    assert names.index('Takeout & delivery') == names.index('Shared dining and entertainment') + 1
+    b.set_account(conn, CHECKING, included=False, role='checking')
+    assert b.account_settings(conn)[CHECKING]['included'] is False
+
+
+def test_people_and_coverage(tmp_path):
+    import finance_budget as b
+    conn = ledger_db(tmp_path)
+    assert b.people(conn) == ['Heather', 'Steve']
+    with pytest.raises(FinanceStoreError):
+        b.set_people(conn, ['shared'])
+    with pytest.raises(FinanceStoreError):
+        b.set_people(conn, ['A', 'A'])
+    b.declare_coverage(conn, account_id=CHECKING, start='2026-11-01', end='2026-11-30', actor='s', today=date(2026, 12, 1))
+    with pytest.raises(FinanceStoreError):
+        b.declare_coverage(conn, account_id=CHECKING, start='2026-11-02', end='2026-11-01', actor='s', today=date(2026, 12, 1))
+    with pytest.raises(FinanceStoreError):
+        b.declare_coverage(conn, account_id=CHECKING, start='2026-11-01', end='2026-12-05', actor='s', today=date(2026, 12, 1))

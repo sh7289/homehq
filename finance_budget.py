@@ -7,15 +7,18 @@ migration or sync ever changes the schema. Seeded targets are planning values or
 estimates carried from the household brief -- never historical actuals.
 """
 import json
+import re
 from datetime import date
+from decimal import Decimal, InvalidOperation
 
-from finance_book import _transaction
+from finance_book import _text, _transaction
 from finance_store import FinanceStoreError, _iso, _utc
 
 CATEGORY_TYPES = ('operating', 'capped', 'sinking', 'income', 'savings', 'transfer', 'other')
 ROLLOVERS = ('reset', 'capped', 'carry')
 BASES = ('planning', 'estimate', 'historical')
 ROLES = ('checking', 'savings', 'reserve', 'card', 'hsa', 'loan', 'other')
+CENT = Decimal('0.01')
 KINDS = ('unclassified', 'expense', 'income', 'refund', 'reimbursement', 'transfer', 'card_payment')
 
 TABLES = frozenset({
@@ -217,3 +220,210 @@ def set_account(conn, account_id, *, included, role):
         conn.execute('INSERT INTO finance_budget_accounts (account_id, included, role) VALUES (?,?,?) '
                      'ON CONFLICT(account_id) DO UPDATE SET included=excluded.included, role=excluded.role',
                      (account_id, int(included), role))
+
+
+MAX_MONEY = Decimal('1e12')
+_MONEY = re.compile(r'[+-]?(?:\d+(?:\.\d{0,2})?|\.\d{1,2})')
+
+
+def parse_money(text, *, signed=True):
+    """Parse a bank or form amount to cents; accepts $, commas and (negative)."""
+    message = 'Enter an amount with at most two decimal places.'
+    if not isinstance(text, str) or len(text) > 40:
+        raise FinanceStoreError(message)
+    value = text.strip().replace('$', '').replace(',', '').replace(' ', '')
+    negative = value.startswith('(') and value.endswith(')')
+    if negative:
+        value = value[1:-1]
+    if not _MONEY.fullmatch(value):
+        raise FinanceStoreError(message)
+    try:
+        number = Decimal(value)
+    except InvalidOperation:
+        raise FinanceStoreError(message) from None
+    if negative:
+        number = -number
+    if number.copy_abs() >= MAX_MONEY or (not signed and number < 0):
+        raise FinanceStoreError(message)
+    return number.quantize(CENT)
+
+
+def money_text(value):
+    return format(Decimal(value).quantize(CENT), 'f')
+
+
+def mask_digits(text):
+    """Printable, single-spaced text with account-number-like digit runs hidden."""
+    if not isinstance(text, str):
+        return ''
+    text = ' '.join(''.join(c if ord(c) >= 32 and ord(c) != 127 else ' ' for c in text).split())
+    return re.sub(r'\d(?:[ -]?\d){3,}', '••••', text)[:200]
+
+
+def _long_text(value, limit=500):
+    if not isinstance(value, str) or len(value) > limit or any(ord(c) < 32 and c not in '\n\r\t' or ord(c) == 127 for c in value):
+        raise FinanceStoreError('Enter shorter plain text.')
+    return value.strip()
+
+
+def _day(value, message='Enter a valid date.'):
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
+        raise FinanceStoreError(message)
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise FinanceStoreError(message) from None
+
+
+def _month(value):
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', value):
+        raise FinanceStoreError('Enter a month as YYYY-MM.')
+    return value
+
+
+def get_setting(conn, key):
+    row = conn.execute('SELECT value FROM finance_budget_settings WHERE key=?', (key,)).fetchone()
+    return row['value'] if row else None
+
+
+def primary_currency(conn):
+    return get_setting(conn, 'primary_currency') or 'USD'
+
+
+def people(conn):
+    try:
+        names = json.loads(get_setting(conn, 'people') or '[]')
+    except ValueError:
+        return []
+    return [n for n in names if isinstance(n, str)]
+
+
+def set_people(conn, names):
+    if not isinstance(names, list) or not 1 <= len(names) <= 6:
+        raise FinanceStoreError('Enter between one and six household members.')
+    cleaned = [_text(n, True) for n in names]
+    if len({n.lower() for n in cleaned}) != len(cleaned) or any(n.lower() == 'shared' for n in cleaned):
+        raise FinanceStoreError('Household member names must be unique and not "shared".')
+    with _transaction(conn):
+        conn.execute("INSERT INTO finance_budget_settings VALUES ('people', ?) "
+                     'ON CONFLICT(key) DO UPDATE SET value=excluded.value', (json.dumps(cleaned),))
+
+
+def account_settings(conn):
+    result = {}
+    for row in conn.execute('SELECT * FROM finance_budget_accounts'):
+        try:
+            profile = json.loads(row['csv_profile'])
+        except ValueError:
+            profile = {}
+        result[row['account_id']] = dict(included=bool(row['included']), role=row['role'],
+                                         csv_profile=profile if isinstance(profile, dict) else {})
+    return result
+
+
+def save_csv_profile(conn, account_id, profile):
+    if not isinstance(profile, dict):
+        raise FinanceStoreError('Import settings are invalid.')
+    with _transaction(conn):
+        conn.execute('UPDATE finance_budget_accounts SET csv_profile=? WHERE account_id=?',
+                     (json.dumps(profile, sort_keys=True), account_id))
+
+
+def _category(conn, category_id):
+    if isinstance(category_id, bool) or not re.fullmatch(r'\d{1,9}', str(category_id)):
+        raise FinanceStoreError('Select an existing category.')
+    row = conn.execute('SELECT * FROM finance_budget_categories WHERE id=?', (int(category_id),)).fetchone()
+    if row is None:
+        raise FinanceStoreError('Select an existing category.')
+    return row
+
+
+def save_category(conn, *, category_id=None, name, parent_id=None, type, default_person='', active=True,
+                  rollover='reset', rollover_cap=None, position=0, policy_includes='', policy_excludes='', notes=''):
+    name = _text(name, True)
+    if type not in CATEGORY_TYPES or rollover not in ROLLOVERS or not isinstance(active, bool):
+        raise FinanceStoreError('Category settings are invalid.')
+    if isinstance(position, bool) or not re.fullmatch(r'-?\d{1,6}', str(position)):
+        raise FinanceStoreError('Category settings are invalid.')
+    cap = None
+    if rollover == 'capped':
+        if rollover_cap in (None, ''):
+            raise FinanceStoreError('A capped rollover needs a maximum available amount.')
+        cap = money_text(parse_money(str(rollover_cap), signed=False))
+    includes, excludes, notes = _long_text(policy_includes), _long_text(policy_excludes), _long_text(notes)
+    with _transaction(conn):
+        if default_person and default_person not in people(conn):
+            raise FinanceStoreError('Select a household member or leave the default person blank.')
+        parent = None
+        if parent_id not in (None, ''):
+            parent_row = _category(conn, parent_id)
+            if parent_row['parent_id'] is not None or (category_id is not None and parent_row['id'] == int(category_id)):
+                raise FinanceStoreError('Subcategories can only sit under a top-level category.')
+            parent = parent_row['id']
+        clash = conn.execute('SELECT id FROM finance_budget_categories WHERE lower(name)=lower(?)', (name,)).fetchone()
+        if clash and (category_id is None or clash['id'] != int(category_id)):
+            raise FinanceStoreError('A category with that name already exists.')
+        values = (name, parent, type, default_person, int(active), rollover, cap, int(position), includes, excludes, notes)
+        if category_id is None:
+            return conn.execute(
+                'INSERT INTO finance_budget_categories (name,parent_id,type,default_person,active,rollover,rollover_cap,'
+                'position,policy_includes,policy_excludes,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)', values).lastrowid
+        existing = _category(conn, category_id)
+        if parent is not None and conn.execute('SELECT 1 FROM finance_budget_categories WHERE parent_id=?',
+                                               (existing['id'],)).fetchone():
+            raise FinanceStoreError('A category with subcategories cannot become a subcategory.')
+        conn.execute('UPDATE finance_budget_categories SET name=?,parent_id=?,type=?,default_person=?,active=?,rollover=?,'
+                     'rollover_cap=?,position=?,policy_includes=?,policy_excludes=?,notes=? WHERE id=?',
+                     values + (existing['id'],))
+        return existing['id']
+
+
+def categories(conn, active_only=False):
+    rows = [dict(r) for r in conn.execute('SELECT * FROM finance_budget_categories ORDER BY position, name')]
+    for row in rows:
+        row['active'] = bool(row['active'])
+    rows = [r for r in rows if r['active']] if active_only else rows
+    ordered = []
+    for parent in (r for r in rows if r['parent_id'] is None):
+        ordered.append(parent)
+        ordered.extend(r for r in rows if r['parent_id'] == parent['id'])
+    return ordered
+
+
+def set_target(conn, *, category_id, effective_month, amount, basis, note, actor, today=None):
+    effective_month = _month(effective_month)
+    today = today or _utc().date()
+    if effective_month < today.strftime('%Y-%m'):
+        raise FinanceStoreError('Targets for past months are kept as they were. Set a target from this month onward.')
+    if basis not in BASES:
+        raise FinanceStoreError('Select whether the target is a planning value, an estimate, or historical.')
+    value = money_text(parse_money(str(amount), signed=False))
+    note, actor = _long_text(note, 200), _text(actor, True)
+    with _transaction(conn):
+        category = _category(conn, category_id)
+        conn.execute('INSERT INTO finance_budget_targets (category_id,effective_month,amount,basis,note,created_by,created_at) '
+                     'VALUES (?,?,?,?,?,?,?) ON CONFLICT(category_id,effective_month) DO UPDATE SET amount=excluded.amount,'
+                     'basis=excluded.basis,note=excluded.note,created_by=excluded.created_by,created_at=excluded.created_at',
+                     (category['id'], effective_month, value, basis, note, actor, _iso(_utc())))
+
+
+def target_for(conn, category_id, month):
+    row = conn.execute('SELECT * FROM finance_budget_targets WHERE category_id=? AND effective_month<=? '
+                       'ORDER BY effective_month DESC LIMIT 1', (category_id, month)).fetchone()
+    if row is None:
+        return None
+    return dict(amount=Decimal(row['amount']), basis=row['basis'], note=row['note'], effective_month=row['effective_month'])
+
+
+def declare_coverage(conn, *, account_id, start, end, actor, today=None, source='declared', batch_id=None):
+    start_day, end_day = _day(start), _day(end)
+    today = today or _utc().date()
+    if start_day > end_day or end_day > today:
+        raise FinanceStoreError('Coverage must start before it ends and cannot extend past today.')
+    actor = _text(actor, True)
+    with _transaction(conn):
+        if not conn.execute('SELECT 1 FROM finance_budget_accounts WHERE account_id=?', (account_id,)).fetchone():
+            raise FinanceStoreError('Set up this account for budgeting first.')
+        conn.execute('INSERT INTO finance_coverage (account_id,start_date,end_date,source,batch_id,created_by,created_at) '
+                     'VALUES (?,?,?,?,?,?,?)', (account_id, start_day.isoformat(), end_day.isoformat(), source, batch_id,
+                                                actor, _iso(_utc())))
