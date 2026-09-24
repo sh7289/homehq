@@ -27,7 +27,7 @@ TABLES = frozenset({
     'finance_budget_settings', 'finance_budget_accounts', 'finance_budget_categories',
     'finance_budget_targets', 'finance_import_batches', 'finance_staged_rows', 'finance_txns',
     'finance_source_records', 'finance_txn_allocations', 'finance_txn_links', 'finance_coverage',
-    'finance_fund_movements', 'finance_recurring',
+    'finance_fund_movements', 'finance_recurring', 'finance_recurring_matches', 'finance_fund_goals',
 })
 
 SCHEMA = """
@@ -123,6 +123,17 @@ CREATE TABLE IF NOT EXISTS finance_recurring (
   category_id INTEGER REFERENCES finance_budget_categories(id),
   status TEXT NOT NULL CHECK (status IN ('active','paused','ended')), notes TEXT NOT NULL DEFAULT '',
   created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_by TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS finance_recurring_matches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  recurring_id INTEGER NOT NULL REFERENCES finance_recurring(id) ON DELETE CASCADE,
+  occurrence_date TEXT NOT NULL,
+  txn_id INTEGER NOT NULL UNIQUE REFERENCES finance_txns(id) ON DELETE CASCADE,
+  created_by TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE (recurring_id, occurrence_date));
+CREATE TABLE IF NOT EXISTS finance_fund_goals (
+  category_id INTEGER PRIMARY KEY REFERENCES finance_budget_categories(id),
+  target_amount TEXT, target_date TEXT, expected_reimbursements TEXT NOT NULL DEFAULT '0.00',
+  note TEXT NOT NULL DEFAULT '', updated_by TEXT NOT NULL, updated_at TEXT NOT NULL);
 """
 
 # (name, parent, type, default_person, rollover, rollover_cap)

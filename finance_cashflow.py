@@ -59,10 +59,13 @@ def forecast(conn, today, now=None):
     start = sum((Decimal(r['balance']) for r in rows), ZERO).quantize(Decimal('0.01'))
     events, past = [], []
 
+    matched = finance_recurring.matched_dates(conn)
     for commitment in commitments:
         if commitment['account_id'] not in ids:
             continue
         for day in finance_recurring.occurrences(commitment, as_of - RECENT_PAST, end):
+            if (commitment['id'], day.isoformat()) in matched:
+                continue  # the actual transaction supersedes the expectation
             amount = commitment['amount'] if commitment['direction'] == 'in' else -commitment['amount']
             item = dict(date=day.isoformat(), label=commitment['name'], amount=amount,
                         kind='income' if commitment['direction'] == 'in' else 'bill')
