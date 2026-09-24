@@ -388,3 +388,25 @@ or a checking or card balance that has stopped updating.
 category totals. They contain private household financial data. Store them like bank
 statements, and delete them when you're done. Text cells that a spreadsheet would run
 as a formula are prefixed with `'`.
+
+### Budgeting Phase 3: planning
+
+The migration adds bill matching and fund goals. Christmas (due 2026-12-24) and
+Celebrations (due 2027-02-01) get their dates but **no target amounts**: the brief
+records only the $520 Gloria/Peter figure, which isn't the whole Christmas budget.
+Enter real totals under **Funds → Set goal**.
+
+- **Match bills to payments:** on a transaction's page, "Expected bill or payday"
+  offers nearby bills and paydays of a similar amount. Pressing "This is it" swaps the
+  expected amount for the real one in the forecast. Nothing is matched automatically.
+- **Savings progress:** set a monthly target on the **Savings** category and import
+  transactions for the savings accounts. The dashboard then compares money actually
+  added to savings with the plan. Setting money aside in a fund doesn't count as saving.
+- **HSA:** the dashboard shows how much spending the HSA paid for, separately.
+- **Plan a bonus** (on the Funds page): proposes the 35/25/15/10/15 split from the
+  earlier brief and shows reserve, savings and fund shortfalls beside it. Only the
+  lines you tick are recorded, as fund contributions. Move the savings share yourself,
+  at your bank.
+- **Financing ending:** the Forecast page lists payments ending within 90 days, and
+  ones past their end date that are still active. Mark those *ended*. Budgets never
+  change on their own when a payment ends.

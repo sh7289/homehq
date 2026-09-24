@@ -25,7 +25,7 @@
     <p class="finance-help">This month: {{ f.month_added|finance_amount }} set aside · {{ f.month_spent|finance_amount }} spent</p>
     {% set p = f.plan %}<p class="budget-goal">{% if f.goal and f.goal.target_amount is not none %}Goal {{ f.goal.target_amount|finance_amount }}{% if f.goal.target_date %} by {{ f.goal.target_date }}{% endif %}: {% elif f.goal and f.goal.target_date %}Needed by {{ f.goal.target_date }}: {% endif %}
       {% if p.status == 'setup_needed' %}{% if f.goal %}record a starting amount to see the gap.{% endif %}
-      {% elif p.status == 'needs_target' %}<span class="ledger-unset">set a target amount and date</span>
+      {% elif p.status == 'needs_target' %}<span class="ledger-unset">set a {{ 'target amount' if f.goal and f.goal.target_date else ('date' if f.goal and f.goal.target_amount is not none else 'target amount and date') }}</span>
       {% elif p.status == 'on_track' %}<strong>fully funded</strong>
       {% elif p.status == 'due' %}<strong class="budget-over">{{ p.gap|finance_amount }} short and the date has passed</strong>
       {% else %}<strong>{{ p.gap|finance_amount }} to go</strong>, about {{ p.needed_monthly|finance_amount }} a month for {{ p.months_left }} month{{ 's' if p.months_left != 1 }}{% endif %}</p>
