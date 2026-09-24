@@ -183,3 +183,24 @@ def test_missing_store_is_friendly(finance_app):  # noqa: F811
     r = app.test_client().get('/finance/transactions')
     assert r.status_code == 200 and b'First sync needed' in r.data
     assert not path.exists()
+
+
+def test_incomplete_plan_does_not_claim_surplus_or_shortfall(budget_app):
+    app, _ = budget_app
+    page = app.test_client().get('/finance/budget?month=2026-11').data
+    assert b'Planned shortfall' not in page and b'Planned surplus' not in page
+    assert b'Unknown until the missing lines have amounts' in page
+    assert not __import__('re').search(rb'\b1 plan lines', page)
+
+
+def test_card_payment_match_not_repeated_as_transfer(budget_app):
+    app, path = budget_app
+    conn = finance_store.connect(str(path))
+    import finance_ledger as L
+    from test_finance_budget import CARD_S
+    out = L.create_txn(conn, account_id=CHECKING, txn_date='2026-09-10', amount='-500', description='AUTOPAY', actor='s')
+    inn = L.create_txn(conn, account_id=CARD_S, txn_date='2026-09-10', amount='500', description='THANK YOU', actor='s')
+    conn.close()
+    page = app.test_client().get(f'/finance/transactions/{out}').data
+    assert page.count(f'name="other_id" value="{inn}"'.encode()) == 1
+    assert b'Possible card payment matches' in page and b'Possible transfer matches' not in page

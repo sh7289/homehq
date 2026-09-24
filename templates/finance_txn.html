@@ -21,14 +21,20 @@
     </div>
     <fieldset class="budget-lines" data-lines>
       <legend>Categories <small>Split only when it’s worth it. Small mixed purchases can go to their main purpose.</small></legend>
-      {% for line in lines %}
+      {% macro line_fields(line) %}
       <div class="budget-line">
         <label>Category<select name="alloc_category"><option value="">—</option>{% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if line.category_id == c.id }}>{{ '— ' if c.parent_id }}{{ c.name }}</option>{% endfor %}</select></label>
         <label>For<select name="alloc_person">{% for p in people %}<option value="{{ p }}" {{ 'selected' if line.person == p }}>{{ 'Shared' if p == 'shared' else p }}</option>{% endfor %}</select></label>
         <label>Amount<input name="alloc_amount" inputmode="decimal" value="{{ line.amount }}" data-amount></label>
         <label>Note<input name="alloc_note" maxlength="200" value="{{ line.note }}"></label>
       </div>
-      {% endfor %}
+      {% endmacro %}
+      {% set filled = lines|selectattr('category_id')|list|length %}
+      {% set shown = [filled, 1]|max %}
+      {% for line in lines[:shown] %}{{ line_fields(line) }}{% endfor %}
+      <details class="budget-more-lines"><summary>Split across more categories</summary>
+      {% for line in lines[shown:] %}{{ line_fields(line) }}{% endfor %}
+      </details>
       <p class="finance-help" data-remaining aria-live="polite"></p>
     </fieldset>
     <label class="budget-note">Note<textarea name="note" maxlength="500" rows="2">{{ txn.note }}</textarea></label>

@@ -159,7 +159,11 @@ def classify(conn, txn_id, *, kind, allocations, actor, merchant=None, note=None
 
 
 def suggest(conn, txn_id):
-    txn = _txn(conn, txn_id)
+    with _transaction(conn):
+        _suggest(conn, _txn(conn, txn_id))
+
+
+def _suggest(conn, txn):
     if txn['review'] != 'unreviewed':
         return
     key = merchant_key(txn['merchant'])

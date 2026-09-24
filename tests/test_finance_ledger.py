@@ -135,3 +135,12 @@ def test_keep_both_clears_duplicate_flag(tmp_path):
     assert flagged in {r['id'] for r in L.transactions(conn, view='review')}
     L.keep_both(conn, flagged, 's')
     assert L.get_txn(conn, flagged)['possible_duplicate_of'] is None
+
+
+def test_standalone_suggest_commits_and_leaves_no_open_transaction(tmp_path):
+    conn = ledger_db(tmp_path)
+    a = L.create_txn(conn, account_id=CARD_H, txn_date='2026-11-01', amount='-30', description='CAFE', actor='h')
+    b = L.create_txn(conn, account_id=CARD_H, txn_date='2026-11-02', amount='-31', description='CAFE', actor='h')
+    L.classify(conn, a, kind='expense', allocations=[alloc(conn, 'Shared dining and entertainment', 'shared', '-30')], actor='h')
+    L.suggest(conn, b)
+    assert not conn.in_transaction

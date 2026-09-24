@@ -33,10 +33,11 @@
   <dl class="budget-plan-lines">
     <div><dt>Planned income</dt><dd>{{ s.plan.income|finance_amount }}</dd></div>
     <div><dt>Planned costs, allowances, fund contributions and savings</dt><dd>− {{ s.plan.outflows|finance_amount }}</dd></div>
-    <div class="budget-plan-total"><dt>{{ 'Planned surplus' if s.plan.surplus >= 0 else 'Planned shortfall' }}</dt><dd>{{ s.plan.surplus|finance_amount }}</dd></div>
+    {% if s.plan.label == 'incomplete' %}<div class="budget-plan-total"><dt>Surplus or shortfall</dt><dd class="ledger-unset">Unknown until the missing lines have amounts</dd></div>
+    {% else %}<div class="budget-plan-total"><dt>{{ 'Planned surplus' if s.plan.surplus >= 0 else 'Planned shortfall' }}</dt><dd>{{ s.plan.surplus|finance_amount }}</dd></div>{% endif %}
   </dl>
   {% if s.plan.missing %}<p>This plan can’t show affordability yet. These have no expected amount (they are not assumed to be $0): <strong>{{ s.plan.missing|join(', ') }}</strong>. <a href="{{ url_for('finance_budget_settings') }}#targets">Set targets</a>.</p>{% endif %}
-  {% if s.plan.unvalidated %}<p class="finance-help">{{ s.plan.unvalidated }} plan lines are planning values or estimates, not amounts confirmed from your transaction history.</p>{% endif %}
+  {% if s.plan.unvalidated %}<p class="finance-help">{{ s.plan.unvalidated }} plan line{{ ' is a planning value or estimate' if s.plan.unvalidated == 1 else 's are planning values or estimates' }}, not {{ 'an amount' if s.plan.unvalidated == 1 else 'amounts' }} confirmed from your transaction history.</p>{% endif %}
 </section>
 
 {% for group, title, note in [('capped', 'Monthly allowances', 'Spending against the few areas with deliberate limits.'), ('operating', 'Operating costs', 'Normal household costs, watched for change rather than capped.'), ('sinking', 'Sinking-fund spending', 'Spending from reserves this month. Fund balances arrive in a later update.'), ('income', 'Income', ''), ('savings', 'Savings', ''), ('other', 'Other', '')] %}

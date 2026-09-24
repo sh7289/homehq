@@ -313,3 +313,46 @@ The existing finance database backup includes all new household records. Verify 
 backup after migration and preserve a pre-upgrade copy. To roll back code, stop app/sync
 first and restore the matching pre-upgrade database; the old sync code does not know
 about manual accounts and must not run against a worksheet database.
+
+## Budgeting (Phase 1): transactions, categories and targets
+
+Budgeting adds household *activity* (transactions) and *intentions* (categories and
+monthly targets) to the same private finance DB. It is still read-only toward banks:
+transactions come from CSV exports you download from each bank or card website, or
+from entries added by hand. SimpleFIN is still balance-only.
+
+**Upgrade.** Deploy the code, then follow the same stop → back up → migrate → start
+sequence as the worksheet upgrade above (`scripts/migrate_finance.py`). Take a verified
+encrypted backup first, because transaction history is new household data. The migration
+is additive and repeatable. Until it runs, the budget pages say "Budgeting update
+needed" and the balance worksheet keeps working. The first migration seeds the
+categories and targets from the household budgeting brief: allowances are marked
+*planning*, and the recorded bills and income are marked *estimate*. Nothing is
+seeded as *historical*, and groceries, pets, medical, transport and the savings
+goal start without targets. The plan therefore shows **Plan incomplete** until the
+household enters them.
+
+**What is stored.** For each transaction: account, dates, amount, a description with
+account-number-like digit runs masked, its category lines, links, and who changed it.
+Provider transaction ids are stored only as a hash. Uploaded CSV files are never
+written to disk. Between upload and import, the parsed cells sit in the private DB
+for at most a day, and they are deleted on import or discard. CSV exports on your
+own computer are bank statements, so delete them after importing.
+
+**First use.**
+1. **Budget settings → Accounts in the budget.** Include every account household
+   spending runs through (checking, each credit card, HSA) and give it a role. This
+   inclusion is separate from what counts toward net worth.
+2. **Imports.** Upload one CSV per account, match the columns, check that purchases
+   show as negative in the sample, and confirm the full date range the export covers.
+   Months are labeled *Insufficient data* until every included account is covered.
+   For an account you enter by hand, use **Record coverage** in settings.
+3. **Transactions.** Review the inbox. Mark transfers and card payments and link both
+   sides, split only when it's worth it, and write short "includes / does not include"
+   guidance on categories where the household tends to disagree.
+4. **Budget.** Check the month view's data status, the plan line, and spending against
+   targets.
+
+Re-importing the same or an overlapping export only adds rows that are new, and it
+never overwrites review work. **Undo this import** on an import page removes its
+transactions. It asks for confirmation if any of them were already reviewed.

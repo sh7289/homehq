@@ -378,3 +378,7 @@
   .budget-links form { margin-left: 0; }
   .budget-month { font-size: .9rem; }
 }
+.budget-plan-lines dd.ledger-unset { white-space: normal; text-align: right; }
+.budget-inbox td:last-child { white-space: normal; min-width: 12rem; }
+.budget-more-lines { margin-top: .6rem; }
+.budget-more-lines summary { cursor: pointer; font-size: .85rem; color: #526448; }

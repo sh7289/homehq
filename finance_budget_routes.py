@@ -188,6 +188,8 @@ def register(app):
                 abort(404)
             kinds = ['transfer', 'card_payment', 'pending_posted'] + (['refund'] if txn['amount'] > 0 else [])
             candidates = {kind: finance_ledger.link_candidates(conn, txn['id'], kind) for kind in kinds}
+            card_ids = {c['id'] for c in candidates['card_payment']}
+            candidates['transfer'] = [c for c in candidates['transfer'] if c['id'] not in card_ids]
             lines = [dict(category_id=a['category_id'], person=a['person'], amount=a['amount'], note=a['note'])
                      for a in txn['allocations']]
             if not lines and txn['suggested_category_id']:
