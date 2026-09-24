@@ -144,7 +144,7 @@ views and exports call. Views never compute totals themselves (§8.1).
 ## Phase 1 data model
 
 ```
-finance_budget_settings   key/value: primary_currency, budget_start ('2026-11-01', unconfirmed)
+finance_budget_settings   key/value: primary_currency, budget_start ('2026-10-01', chosen by the household on 2026-09-24)
 finance_budget_accounts   account_id PK → finance_accounts.id, included 0/1,
                           role (checking | savings | reserve | card | hsa | loan | other),
                           csv_sign (outflow_negative | outflow_positive | debit_credit_columns)
@@ -173,7 +173,7 @@ finance_txn_links         id, kind, from_txn_id, to_txn_id NULL, created_by, cre
 
 **Seed data** (inserted once, when the categories table is created): the §6.2 category
 hierarchy with its types and §6.4 rollover defaults (household wants: capped at $900
-total available), plus §6.1 targets effective `2026-11` with basis `planning`.
+total available), plus §6.1 targets effective `2026-10` with basis `planning` (moved from the spec's November start at the household's request).
 Sinking funds get no balances; that is Phase 2 and starts at "setup needed".
 Operating categories get no targets, because §2.3 forbids inventing baselines, so the plan starts
 *incomplete* until the household enters them. Seeded alongside: an Income category
@@ -184,6 +184,10 @@ Liz and Haley under Childcare, etc.) with its recorded amount as an `estimate` t
 the spec's caveat in the target note (Georgia Power: $215, note "range $200–230"; mattress:
 note "placeholder"; RAV4 and fence: note with the expected end). A parent's planned amount
 is the sum of its children's targets plus its own.
+Tirzepatide ($199.67 monthly equivalent of $599 quarterly, `estimate`, HSA funding unconfirmed)
+and a Routine medical line with no target sit under Health and medical. When a top-level category
+has no target of its own, the plan names each of its subcategories that lacks one, so one known
+line never makes a whole category look planned.
 
 ## Phase 1 behavior
 

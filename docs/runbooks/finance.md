@@ -326,9 +326,9 @@ sequence as the worksheet upgrade above (`scripts/migrate_finance.py`). Take a v
 encrypted backup first, because transaction history is new household data. The migration
 is additive and repeatable. Until it runs, the budget pages say "Budgeting update
 needed" and the balance worksheet keeps working. The first migration seeds the
-categories and targets from the household budgeting brief: allowances are marked
+categories and targets from the household budgeting brief, starting October 2026. Allowances are marked
 *planning*, and the recorded bills and income are marked *estimate*. Nothing is
-seeded as *historical*, and groceries, pets, medical, transport and the savings
+seeded as *historical*, and groceries, pets, routine medical, transport and the savings
 goal start without targets. The plan therefore shows **Plan incomplete** until the
 household enters them.
 

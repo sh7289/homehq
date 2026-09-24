@@ -19,6 +19,8 @@ ROLLOVERS = ('reset', 'capped', 'carry')
 BASES = ('planning', 'estimate', 'historical')
 ROLES = ('checking', 'savings', 'reserve', 'card', 'hsa', 'loan', 'other')
 CENT = Decimal('0.01')
+SEED_VERSION = '2'
+SEED_START_MONTH = '2026-10'
 KINDS = ('unclassified', 'expense', 'income', 'refund', 'reimbursement', 'transfer', 'card_payment')
 
 TABLES = frozenset({
@@ -145,7 +147,7 @@ SEED_CATEGORIES = [
     ('Transfers', None, 'transfer', '', 'reset', None),
 ]
 
-# (category, amount, basis, note) effective 2026-11.
+# (category, amount, basis, note). First seeded effective 2026-11; _seed_v2 moves them to October.
 SEED_TARGETS = [
     ('Shared dining and entertainment', '650.00', 'planning', 'Proposed allowance'),
     ('Household wants', '300.00', 'planning', 'Proposed allowance'),
@@ -185,6 +187,37 @@ def initialize(conn):
                            ('people', json.dumps(['Heather', 'Steve']))):
             conn.execute('INSERT OR IGNORE INTO finance_budget_settings VALUES (?,?)', (key, value))
         _seed(conn)
+        if get_setting(conn, 'seed_version') != SEED_VERSION:
+            _seed_v2(conn)
+            conn.execute("INSERT INTO finance_budget_settings VALUES ('seed_version', ?) "
+                         'ON CONFLICT(key) DO UPDATE SET value=excluded.value', (SEED_VERSION,))
+
+
+def _seed_v2(conn):
+    """Start the seeded plan in October 2026 and add tirzepatide under medical.
+
+    Only rows still exactly as seeded move; anything a person saved is left alone.
+    Routine medical has no target on purpose: the brief records no amount for it,
+    so the plan keeps naming it as missing rather than treating medical as covered.
+    """
+    conn.execute("UPDATE finance_budget_targets SET effective_month=? WHERE created_by='seed' AND effective_month='2026-11' "
+                 'AND NOT EXISTS (SELECT 1 FROM finance_budget_targets t WHERE t.category_id=finance_budget_targets.category_id '
+                 'AND t.effective_month=?)', (SEED_START_MONTH, SEED_START_MONTH))
+    conn.execute("UPDATE finance_budget_settings SET value=? WHERE key='budget_start' AND value='2026-11-01'",
+                 (SEED_START_MONTH + '-01',))
+    health = conn.execute("SELECT id FROM finance_budget_categories WHERE name='Health and medical' AND parent_id IS NULL").fetchone()
+    if health is None:
+        return
+    position = conn.execute("SELECT position FROM finance_budget_categories WHERE id=?", (health['id'],)).fetchone()['position']
+    for name in ('Tirzepatide', 'Routine medical'):
+        conn.execute('INSERT OR IGNORE INTO finance_budget_categories (name,parent_id,type,position) VALUES (?,?,?,?)',
+                     (name, health['id'], 'operating', position))
+    tirzepatide = conn.execute("SELECT id FROM finance_budget_categories WHERE name='Tirzepatide' AND parent_id=?",
+                               (health['id'],)).fetchone()
+    if tirzepatide:
+        conn.execute("INSERT OR IGNORE INTO finance_budget_targets (category_id,effective_month,amount,basis,note,created_by,created_at) "
+                     "VALUES (?,?,'199.67','estimate',?,'seed',?)",
+                     (tirzepatide['id'], SEED_START_MONTH, '$599 quarterly; HSA funding and eligibility not confirmed', _iso(_utc())))
 
 
 def _seed(conn):

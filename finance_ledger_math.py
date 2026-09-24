@@ -177,8 +177,12 @@ def _summary(conn, month, today):
             key = 'income' if category['type'] == 'income' else 'outflows'
             plan[key] += own_target['amount']
             plan['unvalidated'] += own_target['basis'] != 'historical'
-        if category['parent_id'] is None and category['type'] in ('operating', 'savings') and not target_parts:
-            plan['missing'].append(category['name'])
+        if category['parent_id'] is None and category['type'] in ('operating', 'savings') and not own_target:
+            # With subcategories, name each line that has no amount; one known line
+            # (tirzepatide) must not make the whole medical category look planned.
+            lines = [c for c in children.get(category['id'], []) if c['active']]
+            unplanned = [c['name'] for c in lines if not targets[c['id']]] if lines else [category['name']]
+            plan['missing'].extend(unplanned)
 
     if plan['income'] == 0:
         plan['missing'].append('Income')
