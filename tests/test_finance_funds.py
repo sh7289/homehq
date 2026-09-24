@@ -145,3 +145,57 @@ def test_month_spent_counts_only_since_opening(tmp_path):
     opening(conn, 'Gifts and Christmas', '900', day='2026-10-10')
     fund = next(f for f in F.funds(conn, '2026-10') if f['id'] == xmas)
     assert (fund['balance'], fund['month_spent']) == (Decimal('900.00'), Decimal('0.00'))
+
+
+def plan(conn, name, today=TODAY):
+    return next(f for f in F.funds(conn, '2026-10', today=today) if f['name'] == name)['plan']
+
+
+def test_goal_gap_and_monthly(tmp_path):
+    conn = full_db(tmp_path)
+    opening(conn, 'Gifts and Christmas', '400')
+    F.set_goal(conn, category_id=cat(conn, 'Gifts and Christmas'), target_amount='1500', target_date='2026-12-24',
+               expected_reimbursements='100', note='', actor='s')
+    p = plan(conn, 'Gifts and Christmas')
+    assert (p['status'], p['gap'], p['months_left'], p['needed_monthly']) == (
+        'needs_monthly', Decimal('1000.00'), 3, Decimal('333.34'))
+
+
+def test_goal_due_this_month_needs_full_gap(tmp_path):
+    conn = full_db(tmp_path)
+    opening(conn, 'Travel', '100')
+    F.set_goal(conn, category_id=cat(conn, 'Travel'), target_amount='600', target_date='2026-10-30',
+               expected_reimbursements='', note='', actor='s')
+    p = plan(conn, 'Travel')
+    assert (p['months_left'], p['needed_monthly']) == (1, Decimal('500.00'))
+
+
+def test_goal_states(tmp_path):
+    conn = full_db(tmp_path)
+    assert plan(conn, 'Travel')['status'] == 'setup_needed'
+    opening(conn, 'Travel', '700')
+    assert plan(conn, 'Travel')['status'] == 'needs_target'
+    F.set_goal(conn, category_id=cat(conn, 'Travel'), target_amount='600', target_date='2026-12-01',
+               expected_reimbursements='', note='', actor='s')
+    assert plan(conn, 'Travel')['status'] == 'on_track'
+    F.set_goal(conn, category_id=cat(conn, 'Travel'), target_amount='900', target_date='2026-09-01',
+               expected_reimbursements='', note='', actor='s')
+    assert plan(conn, 'Travel')['status'] == 'due' and plan(conn, 'Travel')['gap'] == Decimal('200.00')
+
+
+def test_seeded_christmas_goal_has_date_not_amount(tmp_path):
+    conn = full_db(tmp_path)
+    goal = next(f for f in F.funds(conn, '2026-10') if f['name'] == 'Gifts and Christmas')['goal']
+    assert goal['target_date'] == '2026-12-24' and goal['target_amount'] is None and '$520' in goal['note']
+    B.initialize(conn)
+    assert conn.execute('SELECT COUNT(*) FROM finance_fund_goals').fetchone()[0] == 2
+
+
+def test_goal_validation(tmp_path):
+    conn = full_db(tmp_path)
+    with pytest.raises(FinanceStoreError):
+        F.set_goal(conn, category_id=cat(conn, 'Household wants'), target_amount='5', target_date='',
+                   expected_reimbursements='', note='', actor='s')
+    with pytest.raises(FinanceStoreError):
+        F.set_goal(conn, category_id=cat(conn, 'Travel'), target_amount='-5', target_date='',
+                   expected_reimbursements='', note='', actor='s')

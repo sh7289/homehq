@@ -5,7 +5,8 @@ release, adjustment) or when categorized spending and refunds hit the fund. A
 scheduled contribution never credits a fund, and moving money into a fund is not
 spending. Reserve status checks those allocations against the cash that backs them.
 """
-from decimal import Decimal
+from datetime import date
+from decimal import ROUND_CEILING, Decimal
 
 import finance_budget
 from finance_book import _text, _transaction
@@ -53,7 +54,48 @@ def _spending(conn, ids, start=None, end=None):
     return -sum((Decimal(r['amount']) for r in conn.execute(query, args)), ZERO)
 
 
-def funds(conn, month):
+def set_goal(conn, *, category_id, target_amount, target_date, expected_reimbursements, note, actor):
+    amount = money_text(parse_money(target_amount, signed=False)) if (target_amount or '').strip() else None
+    day = finance_budget._day(target_date).isoformat() if (target_date or '').strip() else None
+    expected = money_text(parse_money(expected_reimbursements, signed=False)) if (expected_reimbursements or '').strip() else '0.00'
+    note, actor = finance_budget._long_text(note or '', 300), _text(actor, True)
+    with _transaction(conn):
+        category = finance_budget._category(conn, category_id)
+        if category['type'] != 'sinking':
+            raise FinanceStoreError('Goals belong to sinking funds.')
+        conn.execute('INSERT INTO finance_fund_goals (category_id,target_amount,target_date,expected_reimbursements,note,updated_by,'
+                     'updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(category_id) DO UPDATE SET target_amount=excluded.target_amount,'
+                     'target_date=excluded.target_date,expected_reimbursements=excluded.expected_reimbursements,note=excluded.note,'
+                     'updated_by=excluded.updated_by,updated_at=excluded.updated_at',
+                     (category['id'], amount, day, expected, note, actor, _iso(_utc())))
+
+
+def _plan(balance, goal, today):
+    if balance is None:
+        return dict(status='setup_needed', gap=None, months_left=None, needed_monthly=None)
+    if not goal or goal['target_amount'] is None or not goal['target_date']:
+        return dict(status='needs_target', gap=None, months_left=None, needed_monthly=None)
+    target = date.fromisoformat(goal['target_date'])
+    gap = max(ZERO, goal['target_amount'] - balance - goal['expected_reimbursements'])
+    months = max(1, (target.year - today.year) * 12 + target.month - today.month + 1)
+    if gap == 0:
+        return dict(status='on_track', gap=gap, months_left=months, needed_monthly=ZERO)
+    if target < today:
+        return dict(status='due', gap=gap, months_left=None, needed_monthly=None)
+    return dict(status='needs_monthly', gap=gap, months_left=months,
+                needed_monthly=(gap / months).quantize(Decimal('0.01'), rounding=ROUND_CEILING))
+
+
+def _goal(conn, category_id):
+    row = conn.execute('SELECT * FROM finance_fund_goals WHERE category_id=?', (category_id,)).fetchone()
+    if row is None:
+        return None
+    return dict(target_amount=Decimal(row['target_amount']) if row['target_amount'] else None, target_date=row['target_date'],
+                expected_reimbursements=Decimal(row['expected_reimbursements']), note=row['note'])
+
+
+def funds(conn, month, today=None):
+    today = today or _utc().date()
     month = finance_budget._month(month)
     first = month + '-01'
     last = month + '-31'
@@ -79,7 +121,9 @@ def funds(conn, month):
         if opening is not None:
             spent_total = _spending(conn, ids, start=opening['movement_date'])
             balance = Decimal(opening['amount']) + added - spent_total
-        rows.append(dict(id=category['id'], name=category['name'], setup_needed=opening is None,
+        goal = _goal(conn, category['id'])
+        rows.append(dict(id=category['id'], name=category['name'], setup_needed=opening is None, goal=goal,
+                         plan=_plan(balance, goal, today),
                          opened_on=opening['movement_date'] if opening else None, balance=balance, spent_total=spent_total,
                          month_spent=_spending(conn, ids, start=max(first, opening['movement_date']) if opening else first,
                                                end=last), month_added=month_added,

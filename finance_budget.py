@@ -19,7 +19,7 @@ ROLLOVERS = ('reset', 'capped', 'carry')
 BASES = ('planning', 'estimate', 'historical')
 ROLES = ('checking', 'savings', 'reserve', 'card', 'hsa', 'loan', 'other')
 CENT = Decimal('0.01')
-SEED_VERSION = '3'
+SEED_VERSION = '4'
 SEED_START_MONTH = '2026-10'
 KINDS = ('unclassified', 'expense', 'income', 'refund', 'reimbursement', 'transfer', 'card_payment')
 
@@ -220,6 +220,8 @@ def initialize(conn):
                 _seed_v2(conn)
             if version < '3':
                 _seed_v3(conn)
+            if version < '4':
+                _seed_v4(conn)
             conn.execute("INSERT INTO finance_budget_settings VALUES ('seed_version', ?) "
                          'ON CONFLICT(key) DO UPDATE SET value=excluded.value', (SEED_VERSION,))
 
@@ -290,6 +292,20 @@ def _seed_v3(conn):
         conn.execute("INSERT INTO finance_recurring (name,direction,amount,amount_kind,cadence,category_id,status,notes,created_by,created_at) "
                      "VALUES (?,?,?,?,?,?,'active',?,'seed',?)", (name, direction, amount, kind, cadence,
                                                                 row['id'] if row else None, note, now))
+
+
+def _seed_v4(conn):
+    """Give the near-term funds their dates; the brief has no totals, so no amounts."""
+    if conn.execute('SELECT 1 FROM finance_fund_goals LIMIT 1').fetchone():
+        return
+    now = _iso(_utc())
+    for name, target_date, note in (
+            ('Gifts and Christmas', '2026-12-24', 'Includes $520 planned for Gloria/Peter gifts; not the whole Christmas budget'),
+            ('Celebrations', '2027-02-01', "Steve's and Siena's February birthdays")):
+        row = conn.execute("SELECT id FROM finance_budget_categories WHERE name=? AND type='sinking'", (name,)).fetchone()
+        if row:
+            conn.execute("INSERT INTO finance_fund_goals (category_id,target_date,note,updated_by,updated_at) VALUES (?,?,?,'seed',?)",
+                         (row['id'], target_date, note, now))
 
 
 def _seed(conn):
