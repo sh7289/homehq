@@ -356,3 +356,35 @@ own computer are bank statements, so delete them after importing.
 Re-importing the same or an overlapping export only adds rows that are new, and it
 never overwrites review work. **Undo this import** on an import page removes its
 transactions. It asks for confirmation if any of them were already reviewed.
+
+### Budgeting Phase 2: funds, forecast and exports
+
+The same migration adds fund movements and bills & paydays. It also seeds the recorded
+bills and the $11,952 income as commitments **without dates**, because the brief has
+amounts but not due dates or paydays.
+
+**Set up once:**
+1. **Budget settings → Accounts:** give savings accounts the role *Savings* or *Reserve*.
+   Their balances back the sinking funds. Set a **checking minimum** under *Cash limits*
+   if you want warnings before checking drops below a floor.
+2. **Funds:** record each fund's starting amount, even if it's $0. A fund stays
+   "Setup needed" until then; it is never shown as $0.
+3. **Forecast → Bills & paydays:** add the next date and the account for each paycheck
+   and bill. Undated ones stay out of the forecast, and the dashboard says roughly how
+   much a month is being left out. Add the fence and RAV4 last-payment dates when
+   they're known.
+
+**Reading the dashboard:** there are six separate statuses (Good, Attention, Unknown)
+and three separate numbers:
+- remaining category budget
+- available cash
+- projected cash after commitments
+
+"Needs attention now" appears only for real risks: a projected drop below the checking
+minimum, a card payment that would overdraw checking, funds that exceed reserve cash,
+or a checking or card balance that has stopped updating.
+
+**Exports:** the Budget page links monthly CSVs of transactions (one row per split) and
+category totals. They contain private household financial data. Store them like bank
+statements, and delete them when you're done. Text cells that a spreadsheet would run
+as a formula are prefixed with `'`.
