@@ -91,10 +91,15 @@ def _summary(conn, month, today):
     inflows = {'count': 0, 'amount': ZERO}
     other = {}
     income = ZERO
-    unreviewed = pending = duplicates = 0
+    linked = {r[0] for r in conn.execute(
+        "SELECT from_txn_id FROM finance_txn_links WHERE kind IN ('transfer','card_payment') "
+        "UNION SELECT to_txn_id FROM finance_txn_links WHERE kind IN ('transfer','card_payment')")}
+    unreviewed = pending = duplicates = unmatched = 0
     for txn in txns:
         amount, lines = Decimal(txn['amount']), allocations.get(txn['id'], [])
         if txn['kind'] in MOVEMENT_KINDS:
+            # A one-sided transfer removes money from spending with no evidence of where it went.
+            unmatched += txn['id'] not in linked
             continue
         if txn['currency'] != currency:
             if txn['kind'] in SPENDING_KINDS or (not lines and amount < 0):
@@ -131,6 +136,8 @@ def _summary(conn, month, today):
             reasons.append(f'{pending} pending transactions may still change.')
         if duplicates:
             reasons.append(f'{duplicates} possible duplicates need a decision.')
+        if unmatched:
+            reasons.append(f'{unmatched} transfers or card payments have no matching other side.')
     quality = 'insufficient' if insufficient else ('provisional' if reasons else 'complete')
 
     rows, plan = [], {'income': ZERO, 'outflows': ZERO, 'unvalidated': 0, 'missing': [], 'bases': []}

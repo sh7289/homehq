@@ -177,3 +177,13 @@ def test_other_currency_kept_separate(tmp_path):
     assert s['other_currencies'] == {'EUR': Decimal('20.00')}
     assert s['known_spending']['total'] == Decimal('0.00')
     assert finance_store
+
+
+def test_unmatched_transfer_keeps_month_provisional(tmp_path):
+    conn = ledger_db(tmp_path)
+    cover_all(conn)
+    t = L.create_txn(conn, account_id=CARD_S, txn_date='2026-11-10', amount='-300', description='SOMETHING', actor='s')
+    L.classify(conn, t, kind='transfer', allocations=[], actor='s')
+    s = month_summary(conn, '2026-11', date(2026, 12, 2))
+    assert s['quality'] == 'provisional'
+    assert '1 transfers or card payments have no matching other side.' in s['quality_reasons']
