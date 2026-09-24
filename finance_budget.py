@@ -19,7 +19,7 @@ ROLLOVERS = ('reset', 'capped', 'carry')
 BASES = ('planning', 'estimate', 'historical')
 ROLES = ('checking', 'savings', 'reserve', 'card', 'hsa', 'loan', 'other')
 CENT = Decimal('0.01')
-SEED_VERSION = '2'
+SEED_VERSION = '3'
 SEED_START_MONTH = '2026-10'
 KINDS = ('unclassified', 'expense', 'income', 'refund', 'reimbursement', 'transfer', 'card_payment')
 
@@ -27,7 +27,7 @@ TABLES = frozenset({
     'finance_budget_settings', 'finance_budget_accounts', 'finance_budget_categories',
     'finance_budget_targets', 'finance_import_batches', 'finance_staged_rows', 'finance_txns',
     'finance_source_records', 'finance_txn_allocations', 'finance_txn_links', 'finance_coverage',
-    'finance_fund_movements',
+    'finance_fund_movements', 'finance_recurring',
 })
 
 SCHEMA = """
@@ -114,6 +114,15 @@ CREATE TABLE IF NOT EXISTS finance_fund_movements (
   kind TEXT NOT NULL CHECK (kind IN ('opening','contribution','release','adjustment')),
   amount TEXT NOT NULL, movement_date TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
   created_by TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS finance_recurring (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+  direction TEXT NOT NULL CHECK (direction IN ('in','out')), amount TEXT NOT NULL,
+  amount_kind TEXT NOT NULL CHECK (amount_kind IN ('exact','estimate','variable','placeholder')),
+  cadence TEXT NOT NULL CHECK (cadence IN ('weekly','biweekly','monthly','quarterly','semiannual','annual','once')),
+  next_date TEXT, end_date TEXT, account_id TEXT REFERENCES finance_accounts(id),
+  category_id INTEGER REFERENCES finance_budget_categories(id),
+  status TEXT NOT NULL CHECK (status IN ('active','paused','ended')), notes TEXT NOT NULL DEFAULT '',
+  created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_by TEXT, updated_at TEXT);
 """
 
 # (name, parent, type, default_person, rollover, rollover_cap)
@@ -194,8 +203,12 @@ def initialize(conn):
                            ('people', json.dumps(['Heather', 'Steve']))):
             conn.execute('INSERT OR IGNORE INTO finance_budget_settings VALUES (?,?)', (key, value))
         _seed(conn)
-        if get_setting(conn, 'seed_version') != SEED_VERSION:
-            _seed_v2(conn)
+        version = get_setting(conn, 'seed_version') or '1'
+        if version != SEED_VERSION:
+            if version < '2':
+                _seed_v2(conn)
+            if version < '3':
+                _seed_v3(conn)
             conn.execute("INSERT INTO finance_budget_settings VALUES ('seed_version', ?) "
                          'ON CONFLICT(key) DO UPDATE SET value=excluded.value', (SEED_VERSION,))
 
@@ -225,6 +238,47 @@ def _seed_v2(conn):
         conn.execute("INSERT OR IGNORE INTO finance_budget_targets (category_id,effective_month,amount,basis,note,created_by,created_at) "
                      "VALUES (?,?,'199.67','estimate',?,'seed',?)",
                      (tirzepatide['id'], SEED_START_MONTH, '$599 quarterly; HSA funding and eligibility not confirmed', _iso(_utc())))
+
+
+# (name, direction, amount, amount_kind, cadence, category, note) -- amounts from the household brief.
+SEED_COMMITMENTS = [
+    ('Income', 'in', '11952.00', 'estimate', 'monthly', 'Income', 'Combined take-home; deposit timing unknown, add the paydays'),
+    ('Mortgage', 'out', '2910.21', 'exact', 'monthly', 'Mortgage', ''),
+    ('Liz', 'out', '1000.00', 'exact', 'monthly', 'Liz', ''),
+    ('Haley', 'out', '250.00', 'exact', 'monthly', 'Haley', ''),
+    ('House cleaning', 'out', '300.00', 'estimate', 'monthly', 'House cleaning', ''),
+    ('Yard service', 'out', '75.00', 'estimate', 'monthly', 'Yard service', ''),
+    ('Student loan', 'out', '490.35', 'exact', 'monthly', 'Student loan', 'Reverify amount'),
+    ('Fence financing', 'out', '560.00', 'exact', 'monthly', 'Fence financing', 'Expected to end spring 2027; add the final date'),
+    ('Home and auto insurance', 'out', '459.00', 'estimate', 'monthly', 'Home and auto insurance',
+     'Monthly equivalent; confirm the real cadence'),
+    ('T-Mobile', 'out', '177.00', 'estimate', 'monthly', 'T-Mobile', ''),
+    ('Georgia Power', 'out', '215.00', 'variable', 'monthly', 'Georgia Power', 'Usually $200–230'),
+    ('AT&T', 'out', '90.00', 'estimate', 'monthly', 'AT&T', ''),
+    ('Water', 'out', '130.00', 'estimate', 'monthly', 'Water', ''),
+    ('Natural gas', 'out', '35.00', 'variable', 'monthly', 'Natural gas', ''),
+    ('Mattress financing', 'out', '250.00', 'placeholder', 'monthly', 'Mattress financing',
+     'Placeholder; confirm payment, cadence and final date'),
+    ('RAV4 financing', 'out', '784.93', 'exact', 'monthly', 'RAV4 financing',
+     'Expected to end after October 2026; add the end date once confirmed'),
+    ('Tirzepatide', 'out', '599.00', 'estimate', 'quarterly', 'Tirzepatide', 'Payment source (HSA or checking) not confirmed'),
+]
+
+
+def _seed_v3(conn):
+    """Seed the recorded bills and income as commitments with no dates.
+
+    The brief has amounts but not due dates or paydays, so every commitment starts
+    without a date and the forecast lists it as needing one rather than guessing.
+    """
+    if conn.execute('SELECT 1 FROM finance_recurring LIMIT 1').fetchone():
+        return
+    now = _iso(_utc())
+    for name, direction, amount, kind, cadence, category, note in SEED_COMMITMENTS:
+        row = conn.execute('SELECT id FROM finance_budget_categories WHERE name=?', (category,)).fetchone()
+        conn.execute("INSERT INTO finance_recurring (name,direction,amount,amount_kind,cadence,category_id,status,notes,created_by,created_at) "
+                     "VALUES (?,?,?,?,?,?,'active',?,'seed',?)", (name, direction, amount, kind, cadence,
+                                                                row['id'] if row else None, note, now))
 
 
 def _seed(conn):

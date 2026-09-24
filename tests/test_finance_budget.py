@@ -157,6 +157,7 @@ def test_november_seed_database_moves_to_october_without_touching_edits(tmp_path
     import finance_budget as b
     conn = ledger_db(tmp_path)
     # Recreate a database seeded by the first release: November seeds, no medical children.
+    conn.execute('DELETE FROM finance_recurring')
     conn.execute("UPDATE finance_budget_targets SET effective_month='2026-11' WHERE created_by='seed'")
     conn.execute("DELETE FROM finance_budget_targets WHERE category_id IN (SELECT id FROM finance_budget_categories "
                  "WHERE name IN ('Tirzepatide','Routine medical'))")
