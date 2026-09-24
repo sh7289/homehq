@@ -1,0 +1,17 @@
+{% extends "finance_budget_base.html" %}
+{% block page_title %}Add transaction{% endblock %}
+{% block heading %}Add a transaction{% endblock %}
+{% block budget_content %}
+{% if not accounts %}<section class="finance-empty"><h2>No budget accounts yet</h2><p>Include at least one account in <a href="{{ url_for('finance_budget_settings') }}#accounts">Budget settings</a> first.</p></section>
+{% else %}
+<form method="post" action="{{ url_for('finance_txn_new') }}" class="ledger-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Account<select name="account_id" required>{% for a in accounts %}<option value="{{ a.id }}" {{ 'selected' if request.form.get('account_id') == a.id }}>{{ a.name }} · {{ a.currency }}</option>{% endfor %}</select></label>
+  <label>Date<input type="date" name="txn_date" required max="{{ today }}" value="{{ request.form.get('txn_date', today) }}"></label>
+  <label>Amount<input name="amount" inputmode="decimal" required value="{{ request.form.get('amount', '') }}" placeholder="-25.00"><small>Negative for money out of this account, positive for money in.</small></label>
+  <label>Description<input name="description" maxlength="200" required value="{{ request.form.get('description', '') }}"></label>
+  <label>Status<select name="status"><option value="posted">Posted</option><option value="pending" {{ 'selected' if request.form.get('status') == 'pending' }}>Pending</option></select></label>
+  <button class="btn btn--primary" type="submit">Add and categorize</button>
+</form>
+{% endif %}
+{% endblock %}

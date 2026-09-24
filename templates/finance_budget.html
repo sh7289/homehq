@@ -1,0 +1,62 @@
+{% extends "finance_budget_base.html" %}
+{% set quality_labels = {'complete': 'Complete', 'provisional': 'Provisional', 'insufficient': 'Insufficient data'} %}
+{% set plan_labels = {'validated': 'Plan validated', 'provisional': 'Plan provisional', 'incomplete': 'Plan incomplete'} %}
+{% macro money(value) %}{% if value is none %}<span class="ledger-unset">—</span>{% else %}{{ value|finance_amount }}{% endif %}{% endmacro %}
+{% block page_title %}Budget {{ s.month }}{% endblock %}
+{% block heading %}What we planned, what happened{% endblock %}
+{% block budget_content %}
+<nav class="budget-month" aria-label="Month">
+  <a href="{{ url_for('finance_budget', month=prev_month) }}" rel="prev">← {{ prev_month }}</a>
+  <h2>{{ s.month }}</h2>
+  <a href="{{ url_for('finance_budget', month=next_month) }}" rel="next">{{ next_month }} →</a>
+</nav>
+
+<section class="budget-quality budget-quality--{{ s.quality }}" aria-labelledby="quality-title">
+  <h2 id="quality-title"><span class="budget-pill budget-pill--{{ s.quality }}">{{ quality_labels[s.quality] }}</span> Data for this month</h2>
+  {% if s.quality == 'complete' %}<p>Every included account has transactions for this month and everything is reviewed.</p>
+  {% else %}<p>{% if s.quality == 'insufficient' %}Spending totals below are known to be missing activity. Don’t read the remaining amounts as final.{% else %}Totals may still change as items are reviewed or post.{% endif %}</p>
+  <ul>{% for reason in s.quality_reasons %}<li>{{ reason }}</li>{% endfor %}</ul>{% endif %}
+  {% set gaps = s.coverage|selectattr('missing')|list %}
+  {% if gaps %}<details><summary>Coverage gaps by account</summary><ul class="budget-gaps">{% for item in gaps %}<li><strong>{{ item.name }}</strong>: {% for start, end in item.missing %}{{ start }}{% if end != start %} to {{ end }}{% endif %}{{ ', ' if not loop.last }}{% endfor %}</li>{% endfor %}</ul>
+    <p class="finance-help"><a href="{{ url_for('finance_imports') }}">Import transactions</a> or <a href="{{ url_for('finance_budget_settings') }}#coverage">record coverage</a> for these dates.</p></details>{% endif %}
+</section>
+
+<section class="ledger-summary budget-summary" aria-label="Month totals">
+  <article><span class="finance-label">Known spending</span><strong>{{ s.known_spending.total|finance_amount }}</strong><span>{{ s.currency }} · {{ s.known_spending.pending|finance_amount }} pending</span></article>
+  <article><span class="finance-label">Not yet categorized</span><strong>{{ s.uncategorized.amount|finance_amount }}</strong><span>{% if s.uncategorized.count %}<a href="{{ url_for('finance_transactions', month=s.month) }}">{{ s.uncategorized.count }} to review</a>{% else %}Nothing waiting{% endif %}</span></article>
+  <article><span class="finance-label">Income recorded</span><strong>{{ s.income|finance_amount }}</strong><span>{% if s.unreviewed_inflows.count %}{{ s.unreviewed_inflows.amount|finance_amount }} in unreviewed deposits{% else %}Categorized as income{% endif %}</span></article>
+</section>
+<p class="finance-help">Known spending includes uncategorized purchases. Transfers and card payments are not spending: the purchases they pay for are counted when they happen.</p>
+
+<section class="budget-plan budget-plan--{{ s.plan.label }}" aria-labelledby="plan-title">
+  <h2 id="plan-title"><span class="budget-pill budget-pill--plan-{{ s.plan.label }}">{{ plan_labels[s.plan.label] }}</span> Monthly operating plan</h2>
+  <dl class="budget-plan-lines">
+    <div><dt>Planned income</dt><dd>{{ s.plan.income|finance_amount }}</dd></div>
+    <div><dt>Planned costs, allowances, fund contributions and savings</dt><dd>− {{ s.plan.outflows|finance_amount }}</dd></div>
+    {% if s.plan.label == 'incomplete' %}<div class="budget-plan-total"><dt>Surplus or shortfall</dt><dd class="ledger-unset">Unknown until the missing lines have amounts</dd></div>
+    {% else %}<div class="budget-plan-total"><dt>{{ 'Planned surplus' if s.plan.surplus >= 0 else 'Planned shortfall' }}</dt><dd>{{ s.plan.surplus|finance_amount }}</dd></div>{% endif %}
+  </dl>
+  {% if s.plan.missing %}<p>This plan can’t show affordability yet. These have no expected amount (they are not assumed to be $0): <strong>{{ s.plan.missing|join(', ') }}</strong>. <a href="{{ url_for('finance_budget_settings') }}#targets">Set targets</a>.</p>{% endif %}
+  {% if s.plan.unvalidated %}<p class="finance-help">{{ s.plan.unvalidated }} plan line{{ ' is a planning value or estimate' if s.plan.unvalidated == 1 else 's are planning values or estimates' }}, not {{ 'an amount' if s.plan.unvalidated == 1 else 'amounts' }} confirmed from your transaction history.</p>{% endif %}
+</section>
+
+{% for group, title, note in [('capped', 'Monthly allowances', 'Spending against the few areas with deliberate limits.'), ('operating', 'Operating costs', 'Normal household costs, watched for change rather than capped.'), ('sinking', 'Sinking-fund spending', 'Spending from reserves this month. Fund balances arrive in a later update.'), ('income', 'Income', ''), ('savings', 'Savings', ''), ('other', 'Other', '')] %}
+{% set rows = s.categories|selectattr('type', 'equalto', group)|list %}
+{% if rows %}
+<section class="ledger-section" aria-labelledby="group-{{ group }}">
+  <header class="ledger-section-title"><h2 id="group-{{ group }}">{{ title }}</h2><span>{{ note }}</span></header>
+  <div class="finance-table-wrap"><table class="ledger-table budget-table">
+    <thead><tr><th scope="col">Category</th><th scope="col" class="number">Target</th><th scope="col" class="number">Posted</th><th scope="col" class="number">Pending</th><th scope="col" class="number">{{ 'Received' if group == 'income' else 'Spent' }}</th><th scope="col" class="number">Used</th></tr></thead>
+    <tbody>{% for row in rows %}
+      <tr class="{{ 'budget-child' if row.parent_id else '' }}"><th scope="row">{% if row.parent_id %}<span aria-hidden="true">↳ </span>{% endif %}<a href="{{ url_for('finance_transactions', view='all', month=s.month, category=row.id) }}">{{ row.name }}</a></th>
+        <td class="number">{{ money(row.target) }}{% if row.basis %}<small class="budget-basis budget-basis--{{ row.basis }}">{{ row.basis }}</small>{% endif %}</td>
+        <td class="number">{{ row.posted|finance_amount }}</td><td class="number">{{ row.pending|finance_amount }}</td>
+        <td class="number"><strong>{{ row.spent|finance_amount }}</strong></td>
+        <td class="number">{% if row.pct_used is none %}<span class="ledger-unset">—</span>{% else %}<span class="{{ 'budget-over' if row.pct_used > 100 else '' }}">{{ row.pct_used }}%</span>{% endif %}</td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
+{% endfor %}
+{% if s.other_currencies %}<p class="finance-notice">Also recorded in other currencies (not converted or included above): {% for code, amount in s.other_currencies.items() %}{{ amount|finance_amount }} {{ code }}{{ ', ' if not loop.last }}{% endfor %}.</p>{% endif %}
+{% endblock %}

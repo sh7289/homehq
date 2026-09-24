@@ -62,6 +62,8 @@ def initialize(conn):
         conn.execute('CREATE TABLE IF NOT EXISTS finance_saved_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, captured_at TEXT NOT NULL, actor TEXT NOT NULL, complete INTEGER NOT NULL, payload TEXT NOT NULL)')
         import finance_payments
         finance_payments.initialize(conn)
+        import finance_budget
+        finance_budget.initialize(conn)
 
 
 def _text(value, required=False):

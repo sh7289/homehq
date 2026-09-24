@@ -1,0 +1,22 @@
+{% extends "finance_budget_base.html" %}
+{% block page_title %}Imports{% endblock %}
+{% block heading %}Import transactions{% endblock %}
+{% block intro %}<p class="finance-intro">Download a CSV of transactions from your bank or card website, then bring it in here. Importing the same file twice won’t create duplicates.</p>{% endblock %}
+{% block budget_content %}
+{% if not accounts %}<section class="finance-empty"><h2>No budget accounts yet</h2><p>Include accounts in <a href="{{ url_for('finance_budget_settings') }}#accounts">Budget settings</a> before importing.</p></section>
+{% else %}
+<form method="post" action="{{ url_for('finance_imports') }}" enctype="multipart/form-data" class="ledger-form budget-upload">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Account<select name="account_id" required>{% for a in accounts %}<option value="{{ a.id }}">{{ a.name }} · {{ a.currency }}</option>{% endfor %}</select></label>
+  <label>Label<input name="label" maxlength="80" placeholder="October statement"></label>
+  <label>CSV file<input type="file" name="file" accept=".csv,text/csv" required><small>Up to 2 MB and 5,000 rows. The file itself is not kept.</small></label>
+  <button class="btn btn--primary" type="submit">Upload and preview</button>
+</form>
+{% endif %}
+<section class="ledger-section" aria-labelledby="batches-title">
+  <header class="ledger-section-title"><h2 id="batches-title">Recent imports</h2><span>Each import can be undone</span></header>
+  {% if batches %}<div class="finance-table-wrap"><table class="ledger-table"><thead><tr><th scope="col">Import</th><th scope="col">Account</th><th scope="col">State</th><th scope="col" class="number">Rows</th><th scope="col" class="number">New</th><th scope="col" class="number">Already had</th></tr></thead><tbody>
+  {% for b in batches %}<tr><th scope="row"><a href="{{ url_for('finance_import', batch_id=b.id) }}">#{{ b.id }} · {{ b.label }}</a><br><small>{{ b.created_at[:10] }} · {{ b.imported_by }}</small></th><td>{{ b.account_name }}</td><td>{{ {'staged': 'Awaiting review', 'committed': 'Imported', 'rolled_back': 'Undone'}[b.state] }}</td><td class="number">{{ b.row_count }}</td><td class="number">{{ b.new_count if b.state != 'staged' else '—' }}</td><td class="number">{{ b.duplicate_count if b.state != 'staged' else '—' }}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<p class="ledger-empty-group">No imports yet.</p>{% endif %}
+</section>
+{% endblock %}

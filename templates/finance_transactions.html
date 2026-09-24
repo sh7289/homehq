@@ -1,0 +1,43 @@
+{% extends "finance_budget_base.html" %}
+{% block page_title %}Transactions{% endblock %}
+{% block heading %}Transactions{% endblock %}
+{% block actions %}<div class="budget-actions"><a class="btn" href="{{ url_for('finance_imports') }}">Import CSV</a><a class="btn btn--primary" href="{{ url_for('finance_txn_new') }}">Add transaction</a></div>{% endblock %}
+{% block budget_content %}
+{% if accepted %}<p class="finance-notice" role="status">Accepted {{ accepted }} suggestion{{ '' if accepted == '1' else 's' }}.</p>{% endif %}
+<form class="budget-filters" method="get" action="{{ url_for('finance_transactions') }}">
+  <label>Show<select name="view"><option value="review" {{ 'selected' if view == 'review' }}>Needs review</option><option value="all" {{ 'selected' if view == 'all' }}>All transactions</option></select></label>
+  <label>Month<input type="month" name="month" value="{{ month }}"></label>
+  <label>Account<select name="account"><option value="">All accounts</option>{% for a in accounts %}<option value="{{ a.id }}" {{ 'selected' if account == a.id }}>{{ a.name }}</option>{% endfor %}</select></label>
+  <label>Category<select name="category"><option value="">All categories</option>{% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if category == c.id|string }}>{{ '— ' if c.parent_id }}{{ c.name }}</option>{% endfor %}</select></label>
+  <button class="btn" type="submit">Filter</button>
+</form>
+{% set suggested = rows|selectattr('review', 'equalto', 'suggested')|list %}
+{% if rows %}
+<form method="post" action="{{ url_for('finance_accept_suggested') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if suggested %}<div class="budget-bulk"><p>{{ suggested|length }} suggestion{{ 's' if suggested|length != 1 }} based on how you categorized the same merchant before. Uncheck any you’d rather review one by one.</p><button class="btn btn--primary" type="submit">Accept checked suggestions</button></div>{% endif %}
+  <div class="finance-table-wrap"><table class="ledger-table budget-inbox">
+    <thead><tr><th scope="col"><span class="sr-only">Accept</span></th><th scope="col">Date</th><th scope="col">Description</th><th scope="col">Account</th><th scope="col" class="number">Amount</th><th scope="col">Category</th></tr></thead>
+    <tbody>{% for t in rows %}
+      <tr class="budget-row--{{ t.status }}">
+        <td>{% if t.review == 'suggested' %}<input type="checkbox" name="txn_id" value="{{ t.id }}" checked aria-label="Accept suggestion for {{ t.merchant }}">{% endif %}</td>
+        <td><time>{{ t.txn_date }}</time></td>
+        <th scope="row"><a href="{{ url_for('finance_txn', txn_id=t.id) }}">{{ t.merchant }}</a>
+          {% if t.status != 'posted' %}<span class="budget-pill budget-pill--{{ t.status }}">{{ t.status|title }}</span>{% endif %}
+          {% if t.possible_duplicate_of %}<span class="budget-pill budget-pill--attention">Possible duplicate</span>{% endif %}
+          {% if t.kind in ('transfer', 'card_payment') and not t.link_count %}<span class="budget-pill budget-pill--attention">Unmatched {{ 'card payment' if t.kind == 'card_payment' else 'transfer' }}</span>{% endif %}</th>
+        <td>{{ t.account_name }}</td>
+        <td class="number {{ 'budget-in' if t.amount > 0 }}">{{ t.amount|finance_amount }}</td>
+        <td>{% if t.review == 'suggested' %}<span class="budget-pill budget-pill--suggested">Suggested</span> {{ t.suggested_name }}
+          {% elif t.kind in ('transfer', 'card_payment') %}{{ 'Card payment' if t.kind == 'card_payment' else 'Transfer' }}
+          {% elif t.lines > 1 %}Split ({{ t.lines }}): {{ t.category_names }}
+          {% elif t.lines == 1 %}{{ t.category_names }}
+          {% else %}<span class="ledger-unset">Needs a category</span>{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+  </table></div>
+</form>
+{% if rows|length >= 200 %}<p class="finance-help">Showing the newest 200. Filter by month or account to see more.</p>{% endif %}
+{% else %}
+<section class="finance-empty"><h2>{{ 'Nothing to review' if view == 'review' else 'No transactions yet' }}</h2><p>{% if view == 'review' %}Every transaction matching these filters has been reviewed.{% else %}Import a CSV export from your bank or card, or add a transaction by hand.{% endif %}</p></section>
+{% endif %}
+{% endblock %}

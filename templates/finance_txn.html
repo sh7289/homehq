@@ -1,0 +1,69 @@
+{% extends "finance_budget_base.html" %}
+{% block page_title %}{{ txn.merchant }}{% endblock %}
+{% block budget_head %}<script src="{{ url_for('static', filename='js/finance-split.js') }}" defer></script>{% endblock %}
+{% block heading %}{{ txn.merchant }}{% endblock %}
+{% block intro %}<p class="finance-intro">{{ txn.txn_date }} · {{ txn.account_name }} · <strong class="{{ 'budget-in' if txn.amount > 0 }}">{{ txn.amount|finance_amount }} {{ txn.currency }}</strong>
+  {% if txn.status != 'posted' %}<span class="budget-pill budget-pill--{{ txn.status }}">{{ txn.status|title }}</span>{% endif %}
+  {% if txn.review == 'accepted' %}<span class="budget-pill budget-pill--complete">Reviewed</span>{% elif txn.review == 'suggested' %}<span class="budget-pill budget-pill--suggested">Suggested</span>{% endif %}</p>{% endblock %}
+{% block budget_content %}
+{% if txn.possible_duplicate_of %}<p class="finance-notice">This may duplicate <a href="{{ url_for('finance_txn', txn_id=txn.possible_duplicate_of) }}">an entry from another source</a> with the same amount within three days. Void one of them, or tick “Keep both” below when you save.</p>{% endif %}
+
+{% if txn.status in ('void', 'replaced') %}
+<p class="finance-notice">{{ 'This transaction was voided and is not counted.' if txn.status == 'void' else 'This pending item was replaced by its posted transaction and is not counted.' }}</p>
+{% else %}
+<section class="ledger-section" aria-labelledby="classify-title">
+  <header class="ledger-section-title"><h2 id="classify-title">What it was for</h2><span>Negative amounts are money out of {{ txn.account_name }}</span></header>
+  <form method="post" action="{{ url_for('finance_txn_classify', txn_id=txn.id) }}" class="budget-classify" data-total="{{ txn.amount }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+    <div class="ledger-form">
+      <label>Kind<select name="kind" data-kind>{% for key, label in kinds.items() %}<option value="{{ key }}" {{ 'selected' if kind == key }}>{{ label }}</option>{% endfor %}</select><small>Transfers and card payments move money between your accounts; they are never spending.</small></label>
+      <label>Merchant name<input name="merchant" maxlength="200" value="{{ txn.merchant }}"><small>The bank’s original text is kept below.</small></label>
+    </div>
+    <fieldset class="budget-lines" data-lines>
+      <legend>Categories <small>Split only when it’s worth it. Small mixed purchases can go to their main purpose.</small></legend>
+      {% macro line_fields(line) %}
+      <div class="budget-line">
+        <label>Category<select name="alloc_category"><option value="">—</option>{% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if line.category_id == c.id }}>{{ '— ' if c.parent_id }}{{ c.name }}</option>{% endfor %}</select></label>
+        <label>For<select name="alloc_person">{% for p in people %}<option value="{{ p }}" {{ 'selected' if line.person == p }}>{{ 'Shared' if p == 'shared' else p }}</option>{% endfor %}</select></label>
+        <label>Amount<input name="alloc_amount" inputmode="decimal" value="{{ line.amount }}" data-amount></label>
+        <label>Note<input name="alloc_note" maxlength="200" value="{{ line.note }}"></label>
+      </div>
+      {% endmacro %}
+      {% set filled = lines|selectattr('category_id')|list|length %}
+      {% set shown = [filled, 1]|max %}
+      {% for line in lines[:shown] %}{{ line_fields(line) }}{% endfor %}
+      <details class="budget-more-lines"><summary>Split across more categories</summary>
+      {% for line in lines[shown:] %}{{ line_fields(line) }}{% endfor %}
+      </details>
+      <p class="finance-help" data-remaining aria-live="polite"></p>
+    </fieldset>
+    <label class="budget-note">Note<textarea name="note" maxlength="500" rows="2">{{ txn.note }}</textarea></label>
+    {% if txn.possible_duplicate_of %}<label class="ledger-checkbox"><input type="checkbox" name="keep_both" value="1"> Keep both. This is a separate purchase.</label>{% endif %}
+    <button class="btn btn--primary" type="submit">Save and mark reviewed</button>
+  </form>
+  <details class="budget-policy"><summary>Household category guide</summary><dl>{% for c in categories if c.policy_includes or c.policy_excludes %}<div><dt>{{ c.name }}</dt>{% if c.policy_includes %}<dd>Includes: {{ c.policy_includes }}</dd>{% endif %}{% if c.policy_excludes %}<dd>Not: {{ c.policy_excludes }}</dd>{% endif %}</div>{% else %}<p class="finance-help">No guidance written yet. Add what counts as household versus personal spending in Budget settings.</p>{% endfor %}</dl></details>
+</section>
+{% endif %}
+
+<section class="ledger-section" aria-labelledby="links-title">
+  <header class="ledger-section-title"><h2 id="links-title">Linked transactions</h2><span>Transfers, card payments, refunds, pending → posted</span></header>
+  {% if txn.links %}<ul class="budget-links">{% for l in txn.links %}<li><span>{{ links[l.kind] }}</span> <a href="{{ url_for('finance_txn', txn_id=l.other_id) }}">{{ l.other_date }} · {{ l.other_merchant }} · {{ l.other_account }} · {{ l.other_amount|finance_amount }}</a>
+    <form method="post" action="{{ url_for('finance_txn_unlink', link_id=l.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn" type="submit">Unlink</button></form></li>{% endfor %}</ul>{% endif %}
+  {% for kind, found in candidates.items() if found %}
+  <h3>Possible {{ links[kind]|lower }} matches</h3>
+  <ul class="budget-links">{% for c in found %}<li>{{ c.txn_date }} · {{ c.merchant }} · {{ c.account_name }} · {{ c.amount|finance_amount }}{% if c.status != 'posted' %} ({{ c.status }}){% endif %}
+    <form method="post" action="{{ url_for('finance_txn_link', txn_id=txn.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="other_id" value="{{ c.id }}">
+      {% if kind == 'card_payment' and payments %}<label class="sr-only" for="pay-{{ c.id }}">Matching payment plan</label><select id="pay-{{ c.id }}" name="payment_id"><option value="">No payment plan</option>{% for p in payments %}<option value="{{ p.id }}">Plan {{ p.payment_date }} · {{ p.amount }}</option>{% endfor %}</select>{% endif %}
+      <button class="btn" type="submit">Link</button></form></li>{% endfor %}</ul>
+  {% endfor %}
+  {% if not txn.links and not (candidates.values()|select|list) %}<p class="ledger-empty-group">No likely matches found nearby. {% if kind in ('transfer', 'card_payment') %}If the other side isn’t imported yet, this stays flagged as unmatched.{% endif %}</p>{% endif %}
+</section>
+
+<section class="ledger-section" aria-labelledby="evidence-title">
+  <header class="ledger-section-title"><h2 id="evidence-title">Original record</h2><span>Kept unchanged for reference</span></header>
+  <dl class="budget-evidence"><div><dt>Bank description</dt><dd>{{ txn.original_description }}</dd></div>
+    {% for r in txn.source_records %}<div><dt>Source</dt><dd>{{ 'CSV import' if r.source == 'csv' else 'Entered by hand' }}{% if r.batch_id %} · <a href="{{ url_for('finance_import', batch_id=r.batch_id) }}">import #{{ r.batch_id }}</a>{% endif %}{% if r.columns.posted_date %} · posted {{ r.columns.posted_date }}{% endif %}</dd></div>{% endfor %}
+    <div><dt>Added</dt><dd>{{ txn.created_at[:10] }} by {{ txn.created_by }}{% if txn.updated_by %} · last changed {{ txn.updated_at[:10] }} by {{ txn.updated_by }}{% endif %}</dd></div></dl>
+  {% if txn.status not in ('void',) %}<form method="post" action="{{ url_for('finance_txn_void', txn_id=txn.id) }}" class="budget-void"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn" type="submit">Void this transaction</button><small>Use for duplicates. It stays here but isn’t counted.</small></form>{% endif %}
+</section>
+{% endblock %}

@@ -269,3 +269,6 @@ def init_app(app):
             abort(404)
         except (OSError, sqlite3.Error, UpgradeNeeded):
             return render_worksheet('Saved snapshots are unavailable. Check the finance setup.', 503)
+
+    import finance_budget_routes
+    finance_budget_routes.register(app)

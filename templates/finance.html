@@ -7,6 +7,7 @@
   <header class="finance-heading"><div><p class="finance-eyebrow">Household ledger / private</p><h1>Where our money is</h1><p class="finance-intro">Your accounts, organized for a clearer picture.</p></div>
     {% if data and not unavailable and not upgrade %}<form method="post" action="{{ url_for('finance_save_snapshot') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn--primary" type="submit">Save snapshot</button></form>{% endif %}
   </header>
+  {% include 'finance_subnav.html' %}
   {% if error %}<p class="finance-notice" role="alert">{{ error }}</p>{% endif %}
   {% if demo %}<p class="finance-notice">Demo preview — fictional balances.</p>{% endif %}
   {% if unavailable %}<section class="finance-empty"><h2>Balances temporarily unavailable</h2><p>The local finance store could not be read. Check the server configuration and sync.</p></section>

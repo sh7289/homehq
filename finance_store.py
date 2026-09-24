@@ -29,7 +29,8 @@
     }
 
 Only normalized current accounts, daily balance totals, and safe sync status
-are persisted. There is no transaction storage.
+are persisted here. Household transactions for budgeting live in separate tables
+managed by ``finance_budget`` / ``finance_ledger``; sync never writes them.
 """
 
 import json
