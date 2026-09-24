@@ -86,6 +86,13 @@ def _summary(conn, month, today):
         allocations.setdefault(line['txn_id'], []).append(line)
 
     direct = category_spending(conn, month)
+    roles = {r['account_id']: r['role'] for r in conn.execute('SELECT account_id, role FROM finance_budget_accounts')}
+    funding = {'hsa': ZERO, 'everyday': ZERO}
+    for line in conn.execute(
+            "SELECT t.account_id, a.amount FROM finance_txn_allocations a JOIN finance_txns t ON t.id=a.txn_id "
+            "WHERE t.txn_date BETWEEN ? AND ? AND t.status IN ('posted','pending') AND t.kind IN ('expense','refund','reimbursement') "
+            "AND t.currency=?", (start.isoformat(), end.isoformat(), currency)):
+        funding['hsa' if roles.get(line['account_id']) == 'hsa' else 'everyday'] -= Decimal(line['amount'])
     known = {'posted': sum((d['posted'] for d in direct.values()), ZERO),
              'pending': sum((d['pending'] for d in direct.values()), ZERO)}
     uncategorized = {'count': 0, 'amount': ZERO}
@@ -115,6 +122,7 @@ def _summary(conn, month, today):
                 uncategorized['count'] += 1
                 uncategorized['amount'] -= amount
                 known[bucket] -= amount
+                funding['hsa' if roles.get(txn['account_id']) == 'hsa' else 'everyday'] -= amount
             else:
                 inflows['count'] += 1
                 inflows['amount'] += amount
@@ -187,7 +195,8 @@ def _summary(conn, month, today):
 
     return dict(month=month, currency=currency, coverage=coverage, allowances=allowances(conn, month, today), quality=quality, quality_reasons=reasons,
                 known_spending=dict(posted=known['posted'], pending=known['pending'], total=known['posted'] + known['pending']),
-                uncategorized=uncategorized, unreviewed_inflows=inflows, income=income, categories=rows, plan=plan,
+                uncategorized=uncategorized, unreviewed_inflows=inflows,
+                funding=dict(funding, total=funding['hsa'] + funding['everyday']), income=income, categories=rows, plan=plan,
                 other_currencies={k: v for k, v in other.items() if v})
 
 

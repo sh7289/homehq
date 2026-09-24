@@ -8,6 +8,7 @@ from decimal import Decimal
 
 import finance_cashflow
 import finance_funds
+import finance_savings
 from finance_budget import money_text, primary_currency
 from finance_ledger import _display
 from finance_ledger_math import month_summary
@@ -55,7 +56,8 @@ def dashboard(conn, month, today, now=None):
         status['discretionary'] = ('good', 'Every allowance is within its budget' + note + '.')
 
     status['reserve'] = ({'ok': 'good', 'shortfall': 'attention', 'unknown': 'unknown'}[reserve['state']], reserve['reason'])
-    status['savings'] = ('unknown', 'A savings plan arrives in a later update.')
+    savings = finance_savings.progress(conn, month, today)
+    status['savings'] = (savings['state'], savings['message'])
 
     if forecast['below_minimum']:
         low = forecast['below_minimum']
@@ -72,7 +74,7 @@ def dashboard(conn, month, today, now=None):
                              else 'Every included account is covered and reviewed.')
 
     dimensions = [dict(key=key, label=label, state=status[key][0], message=status[key][1]) for key, label in LABELS]
-    return dict(summary=summary, allowances=allowances, funds=funds, reserve=reserve, forecast=forecast,
+    return dict(summary=summary, allowances=allowances, funds=funds, reserve=reserve, forecast=forecast, savings=savings,
                 numbers=numbers, dimensions=dimensions, exceptions=_exceptions(conn, forecast, reserve, now))
 
 
