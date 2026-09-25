@@ -26,6 +26,15 @@
     <button class="btn" type="submit">Record coverage</button></form>
 </section>
 
+<section class="ledger-section" id="limits" aria-labelledby="limits-title">
+  <header class="ledger-section-title"><h2 id="limits-title">Cash limits</h2><span>Used by the forecast and fund checks</span></header>
+  <p class="finance-help">The checking minimum is the balance you never want to go below; the forecast warns before it happens. Reserve holds are reserve cash already promised elsewhere, so funds can’t count on it. Leave blank for none.</p>
+  <form method="post" action="{{ url_for('finance_budget_settings_save', section='limits') }}" class="ledger-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Checking minimum<input name="checking_minimum" inputmode="decimal" value="{{ limits.checking_minimum if limits.checking_minimum is not none }}" placeholder="0.00"></label>
+    <label>Reserve holds<input name="reserve_holds" inputmode="decimal" value="{{ limits.reserve_holds if limits.reserve_holds is not none }}" placeholder="0.00"></label>
+    <button class="btn" type="submit">Save limits</button></form>
+</section>
+
 <section class="ledger-section" id="people" aria-labelledby="people-title">
   <header class="ledger-section-title"><h2 id="people-title">Household members</h2><span>Who a purchase can be for, besides “shared”</span></header>
   <form method="post" action="{{ url_for('finance_budget_settings_save', section='people') }}" class="ledger-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

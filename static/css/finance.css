@@ -382,3 +382,50 @@
 .budget-inbox td:last-child { white-space: normal; min-width: 12rem; }
 .budget-more-lines { margin-top: .6rem; }
 .budget-more-lines summary { cursor: pointer; font-size: .85rem; color: #526448; }
+
+/* Budgeting phase 2 */
+.budget-exceptions { border: 1px solid #d9a898; border-left: 4px solid #b0573f; background: #f6e3dc; border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1.5rem; }
+.finance .budget-exceptions h2 { font: 600 1rem/1.4 system-ui, sans-serif; color: #7d3524; margin: 0 0 .4rem; }
+.budget-exceptions ul { margin: 0; padding-left: 1.2rem; line-height: 1.6; }
+.budget-numbers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: #d8d0c4; border: 1px solid #d8d0c4; border-radius: 8px; overflow: hidden; margin-bottom: .6rem; }
+.budget-numbers article { background: #faf7ef; padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: .3rem; }
+.budget-numbers strong { font: 500 1.7rem/1.1 Georgia, serif; font-variant-numeric: tabular-nums; }
+.budget-numbers span:last-child { font-size: .75rem; color: #706555; }
+.budget-dimensions ul { list-style: none; margin: 1rem 0 1.5rem; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
+.budget-dimension { display: grid; grid-template-columns: auto 1fr; gap: .15rem .6rem; align-items: baseline; padding: .7rem .9rem; border: 1px solid #e2dacd; border-radius: 6px; font-size: .85rem; }
+.budget-dimension strong { font-weight: 500; }
+.budget-dimension > span:last-child { grid-column: 2; color: #5a5046; line-height: 1.45; }
+.budget-pill--dim-good { background: #edf0e6; border-color: #b9c2af; color: #43583d; }
+.budget-pill--dim-attention { background: #f6e3dc; border-color: #d9a898; color: #7d3524; }
+.budget-pill--dim-unknown { background: #efece6; border-color: #cfc6b8; color: #5a5046; }
+.budget-allowances { margin-bottom: 1.5rem; }
+.finance .budget-allowances h2 { font: 500 1.2rem/1.3 Georgia, serif; }
+.budget-allowance-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: .7rem; }
+.budget-allowance-grid article { border: 1px solid #d8d0c4; border-radius: 6px; padding: .9rem; background: #faf7ef; display: flex; flex-direction: column; gap: .35rem; }
+.budget-allowance-grid strong { font: 500 1.6rem/1.1 Georgia, serif; font-variant-numeric: tabular-nums; }
+.budget-allowance-grid span:not(.finance-label) { font-size: .75rem; color: #706555; }
+.budget-over-card { border-color: #d9a898 !important; }
+.budget-over-card strong { color: #7d3524; }
+.budget-meter { display: block; height: 4px; border-radius: 2px; background: #e8e1d4; overflow: hidden; }
+.budget-meter span { display: block; height: 100%; background: #526448; }
+.budget-over-card .budget-meter span { background: #b0573f; }
+.budget-exports { font-size: .85rem; color: #5a5046; margin: 1.5rem 0; }
+.budget-fund-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+.budget-fund { border: 1px solid #d8d0c4; border-radius: 8px; padding: 1rem 1.1rem; background: #faf7ef; }
+.finance .budget-fund h2 { font: 500 1.1rem/1.3 Georgia, serif; margin: 0 0 .4rem; }
+.budget-fund-balance { margin: .2rem 0 .5rem; }
+.budget-fund-balance strong { font: 500 1.8rem/1.1 Georgia, serif; font-variant-numeric: tabular-nums; }
+.budget-fund-balance span { font-size: .75rem; color: #706555; }
+.budget-fund details summary { cursor: pointer; font-size: .85rem; color: #526448; }
+.budget-fund .ledger-form { grid-template-columns: 1fr; margin-top: .7rem; }
+.budget-row--risk td, .budget-row--risk th { background: #f9ebe5; }
+@media (max-width: 650px) {
+  .budget-numbers { grid-template-columns: 1fr; }
+  .budget-dimensions ul { grid-template-columns: 1fr; }
+}
+
+/* Budgeting phase 3 */
+.budget-goal { font-size: .85rem; margin: .2rem 0 .4rem; }
+.finance .budget-subhead { font: 500 1.1rem/1.3 Georgia, serif; margin: 1.5rem 0 .2rem; }
+.budget-bonus-form { margin-bottom: 1rem; }
+.budget-savings-line { margin-top: -.2rem; }

@@ -1,0 +1,57 @@
+{% extends "finance_budget_base.html" %}
+{% block page_title %}Funds{% endblock %}
+{% block heading %}Sinking funds{% endblock %}
+{% block actions %}<div class="budget-actions"><a class="btn" href="{{ url_for('finance_bonus') }}">Plan a bonus</a></div>{% endblock %}
+{% block intro %}<p class="finance-intro">Money set aside for irregular costs. Setting money aside isn’t spending; buying the gift is. Funds change only when you record a movement or spend from them.</p>{% endblock %}
+{% block budget_content %}
+<section class="budget-quality budget-quality--{{ {'ok': 'complete', 'shortfall': 'insufficient', 'unknown': 'provisional'}[reserve.state] }}" aria-labelledby="reserve-title">
+  <h2 id="reserve-title"><span class="budget-pill budget-pill--dim-{{ {'ok': 'good', 'shortfall': 'attention', 'unknown': 'unknown'}[reserve.state] }}">{{ {'ok': 'Backed', 'shortfall': 'Shortfall', 'unknown': 'Unknown'}[reserve.state] }}</span> Is the money really there?</h2>
+  <p>{{ reserve.reason }}</p>
+  {% if reserve.backing is not none %}<dl class="budget-plan-lines">
+    <div><dt>Reserve cash ({{ reserve.accounts|join(', ') }})</dt><dd>{{ reserve.backing|finance_amount }}</dd></div>
+    <div><dt>Allocated to funds</dt><dd>− {{ reserve.allocated|finance_amount }}</dd></div>
+    {% if reserve.holds %}<div><dt>Other holds</dt><dd>− {{ reserve.holds|finance_amount }}</dd></div>{% endif %}
+    <div class="budget-plan-total"><dt>Unallocated reserve cash</dt><dd>{{ reserve.unallocated|finance_amount }}</dd></div>
+  </dl>{% endif %}
+</section>
+
+<div class="budget-fund-grid">
+{% for f in funds %}
+  <article class="budget-fund">
+    <h2>{{ f.name }}</h2>
+    {% if f.setup_needed %}<p class="budget-fund-balance"><span class="budget-pill budget-pill--attention">Setup needed</span></p>
+      <p class="finance-help">Record how much is already set aside for this, even if it’s $0. Until then it isn’t counted as $0.</p>
+    {% else %}<p class="budget-fund-balance"><strong>{{ f.balance|finance_amount }}</strong> <span>since {{ f.opened_on }}</span></p>{% endif %}
+    <p class="finance-help">This month: {{ f.month_added|finance_amount }} set aside · {{ f.month_spent|finance_amount }} spent</p>
+    {% set p = f.plan %}<p class="budget-goal">{% if f.goal and f.goal.target_amount is not none %}Goal {{ f.goal.target_amount|finance_amount }}{% if f.goal.target_date %} by {{ f.goal.target_date }}{% endif %}: {% elif f.goal and f.goal.target_date %}Needed by {{ f.goal.target_date }}: {% endif %}
+      {% if p.status == 'setup_needed' %}{% if f.goal %}record a starting amount to see the gap.{% endif %}
+      {% elif p.status == 'needs_target' %}<span class="ledger-unset">set a {{ 'target amount' if f.goal and f.goal.target_date else ('date' if f.goal and f.goal.target_amount is not none else 'target amount and date') }}</span>
+      {% elif p.status == 'on_track' %}<strong>fully funded</strong>
+      {% elif p.status == 'due' %}<strong class="budget-over">{{ p.gap|finance_amount }} short and the date has passed</strong>
+      {% else %}<strong>{{ p.gap|finance_amount }} to go</strong>, about {{ p.needed_monthly|finance_amount }} a month for {{ p.months_left }} month{{ 's' if p.months_left != 1 }}{% endif %}</p>
+    {% if f.goal and f.goal.note %}<p class="finance-help">{{ f.goal.note }}</p>{% endif %}
+    <details><summary>Set goal</summary>
+      <form method="post" action="{{ url_for('finance_fund_goal') }}" class="ledger-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="category_id" value="{{ f.id }}">
+        <label>Target amount<input name="target_amount" inputmode="decimal" value="{{ f.goal.target_amount if f.goal and f.goal.target_amount is not none }}"></label>
+        <label>Needed by<input type="date" name="target_date" value="{{ f.goal.target_date if f.goal and f.goal.target_date }}"></label>
+        <label>Expected reimbursements<input name="expected_reimbursements" inputmode="decimal" value="{{ f.goal.expected_reimbursements if f.goal and f.goal.expected_reimbursements }}"><small>Money you expect back, such as family chipping in.</small></label>
+        <label>Note<input name="note" maxlength="300" value="{{ f.goal.note if f.goal }}"></label>
+        <button class="btn" type="submit">Save goal</button></form></details>
+    <details {% if f.setup_needed %}open{% endif %}><summary>{{ 'Record the starting amount' if f.setup_needed else 'Add or adjust' }}</summary>
+      <form method="post" action="{{ url_for('finance_fund_movement') }}" class="ledger-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="category_id" value="{{ f.id }}">
+        <label>Movement<select name="kind">{% for key, label in [('opening', 'Starting amount (replaces any earlier one)'), ('contribution', 'Set aside more'), ('release', 'Move back to unallocated'), ('adjustment', 'Correction (+ or −)')] %}<option value="{{ key }}" {{ 'selected' if (f.setup_needed and key == 'opening') or (not f.setup_needed and key == 'contribution') }}>{{ label }}</option>{% endfor %}</select></label>
+        <label>Amount<input name="amount" inputmode="decimal" required placeholder="0.00"></label>
+        <label>Date<input type="date" name="movement_date" required max="{{ today }}" value="{{ today }}"></label>
+        <label>Note<input name="note" maxlength="200"></label>
+        <button class="btn" type="submit">Record</button></form></details>
+  </article>
+{% endfor %}
+</div>
+
+<section class="ledger-section" aria-labelledby="history-title">
+  <header class="ledger-section-title"><h2 id="history-title">Recent fund movements</h2><span>Allocations, not bank transactions</span></header>
+  {% if history %}<div class="finance-table-wrap"><table class="ledger-table"><thead><tr><th scope="col">Date</th><th scope="col">Fund</th><th scope="col">Movement</th><th scope="col" class="number">Amount</th><th scope="col">Note</th><th scope="col">By</th></tr></thead><tbody>
+  {% for m in history %}<tr><td>{{ m.movement_date }}</td><th scope="row">{{ m.fund }}</th><td>{{ {'opening': 'Starting amount', 'contribution': 'Set aside', 'release': 'Moved back', 'adjustment': 'Correction'}[m.kind] }}</td><td class="number">{{ ('−' if m.kind == 'release' else '') }}{{ m.amount|finance_amount }}</td><td>{{ m.note }}</td><td>{{ m.created_by }}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<p class="ledger-empty-group">No movements yet.</p>{% endif %}
+</section>
+{% endblock %}

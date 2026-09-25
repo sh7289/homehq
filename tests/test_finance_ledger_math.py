@@ -145,7 +145,7 @@ def test_plan_provisional_then_validated(tmp_path):
     assert plan['surplus'] == plan['income'] - plan['outflows']
     for t in conn.execute('SELECT category_id, effective_month, amount FROM finance_budget_targets').fetchall():
         B.set_target(conn, category_id=t['category_id'], effective_month=t['effective_month'], amount=t['amount'],
-                     basis='historical', note='', actor='s', today=date(2026, 11, 1))
+                     basis='historical', note='', actor='s', today=date(2026, 10, 1))
     plan = month_summary(conn, '2026-11', date(2026, 11, 15))['plan']
     assert plan['label'] == 'validated' and plan['unvalidated'] == 0
 
@@ -187,3 +187,11 @@ def test_unmatched_transfer_keeps_month_provisional(tmp_path):
     s = month_summary(conn, '2026-11', date(2026, 12, 2))
     assert s['quality'] == 'provisional'
     assert '1 transfers or card payments have no matching other side.' in s['quality_reasons']
+
+
+def test_medical_is_named_by_its_missing_line(tmp_path):
+    conn = ledger_db(tmp_path)
+    plan = month_summary(conn, '2026-10', date(2026, 10, 15))['plan']
+    assert 'Routine medical' in plan['missing']
+    assert 'Health and medical' not in plan['missing'] and 'Tirzepatide' not in plan['missing']
+    assert 'Housing and fixed obligations' not in plan['missing']

@@ -326,9 +326,9 @@ sequence as the worksheet upgrade above (`scripts/migrate_finance.py`). Take a v
 encrypted backup first, because transaction history is new household data. The migration
 is additive and repeatable. Until it runs, the budget pages say "Budgeting update
 needed" and the balance worksheet keeps working. The first migration seeds the
-categories and targets from the household budgeting brief: allowances are marked
+categories and targets from the household budgeting brief, starting October 2026. Allowances are marked
 *planning*, and the recorded bills and income are marked *estimate*. Nothing is
-seeded as *historical*, and groceries, pets, medical, transport and the savings
+seeded as *historical*, and groceries, pets, routine medical, transport and the savings
 goal start without targets. The plan therefore shows **Plan incomplete** until the
 household enters them.
 
@@ -356,3 +356,57 @@ own computer are bank statements, so delete them after importing.
 Re-importing the same or an overlapping export only adds rows that are new, and it
 never overwrites review work. **Undo this import** on an import page removes its
 transactions. It asks for confirmation if any of them were already reviewed.
+
+### Budgeting Phase 2: funds, forecast and exports
+
+The same migration adds fund movements and bills & paydays. It also seeds the recorded
+bills and the $11,952 income as commitments **without dates**, because the brief has
+amounts but not due dates or paydays.
+
+**Set up once:**
+1. **Budget settings → Accounts:** give savings accounts the role *Savings* or *Reserve*.
+   Their balances back the sinking funds. Set a **checking minimum** under *Cash limits*
+   if you want warnings before checking drops below a floor.
+2. **Funds:** record each fund's starting amount, even if it's $0. A fund stays
+   "Setup needed" until then; it is never shown as $0.
+3. **Forecast → Bills & paydays:** add the next date and the account for each paycheck
+   and bill. Undated ones stay out of the forecast, and the dashboard says roughly how
+   much a month is being left out. Add the fence and RAV4 last-payment dates when
+   they're known.
+
+**Reading the dashboard:** there are six separate statuses (Good, Attention, Unknown)
+and three separate numbers:
+- remaining category budget
+- available cash
+- projected cash after commitments
+
+"Needs attention now" appears only for real risks: a projected drop below the checking
+minimum, a card payment that would overdraw checking, funds that exceed reserve cash,
+or a checking or card balance that has stopped updating.
+
+**Exports:** the Budget page links monthly CSVs of transactions (one row per split) and
+category totals. They contain private household financial data. Store them like bank
+statements, and delete them when you're done. Text cells that a spreadsheet would run
+as a formula are prefixed with `'`.
+
+### Budgeting Phase 3: planning
+
+The migration adds bill matching and fund goals. Christmas (due 2026-12-24) and
+Celebrations (due 2027-02-01) get their dates but **no target amounts**: the brief
+records only the $520 Gloria/Peter figure, which isn't the whole Christmas budget.
+Enter real totals under **Funds → Set goal**.
+
+- **Match bills to payments:** on a transaction's page, "Expected bill or payday"
+  offers nearby bills and paydays of a similar amount. Pressing "This is it" swaps the
+  expected amount for the real one in the forecast. Nothing is matched automatically.
+- **Savings progress:** set a monthly target on the **Savings** category and import
+  transactions for the savings accounts. The dashboard then compares money actually
+  added to savings with the plan. Setting money aside in a fund doesn't count as saving.
+- **HSA:** the dashboard shows how much spending the HSA paid for, separately.
+- **Plan a bonus** (on the Funds page): proposes the 35/25/15/10/15 split from the
+  earlier brief and shows reserve, savings and fund shortfalls beside it. Only the
+  lines you tick are recorded, as fund contributions. Move the savings share yourself,
+  at your bank.
+- **Financing ending:** the Forecast page lists payments ending within 90 days, and
+  ones past their end date that are still active. Mark those *ended*. Budgets never
+  change on their own when a payment ends.

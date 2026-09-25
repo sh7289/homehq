@@ -45,6 +45,14 @@
 </section>
 {% endif %}
 
+{% if expected or expected_candidates %}<section class="ledger-section" aria-labelledby="expected-title">
+  <header class="ledger-section-title"><h2 id="expected-title">Expected bill or payday</h2><span>Matching removes it from the forecast; the actual counts instead</span></header>
+  {% if expected %}<ul class="budget-links"><li><span>Matched</span> {{ expected.name }} due {{ expected.occurrence_date }} (expected {{ expected.amount|finance_amount }})
+    <form method="post" action="{{ url_for('finance_txn_unmatch', match_id=expected.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn" type="submit">Unmatch</button></form></li></ul>
+  {% else %}<ul class="budget-links">{% for c in expected_candidates %}<li>{{ c.name }} · due {{ c.occurrence_date }} · expected {{ c.expected|finance_amount }}
+    <form method="post" action="{{ url_for('finance_txn_match', txn_id=txn.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="recurring_id" value="{{ c.recurring_id }}"><input type="hidden" name="occurrence_date" value="{{ c.occurrence_date }}"><button class="btn" type="submit">This is it</button></form></li>{% endfor %}</ul>{% endif %}
+</section>{% endif %}
+
 <section class="ledger-section" aria-labelledby="links-title">
   <header class="ledger-section-title"><h2 id="links-title">Linked transactions</h2><span>Transfers, card payments, refunds, pending → posted</span></header>
   {% if txn.links %}<ul class="budget-links">{% for l in txn.links %}<li><span>{{ links[l.kind] }}</span> <a href="{{ url_for('finance_txn', txn_id=l.other_id) }}">{{ l.other_date }} · {{ l.other_merchant }} · {{ l.other_account }} · {{ l.other_amount|finance_amount }}</a>

@@ -1,0 +1,31 @@
+{% extends "finance_budget_base.html" %}
+{% block page_title %}Bills & paydays{% endblock %}
+{% block heading %}Bills &amp; paydays{% endblock %}
+{% block intro %}<p class="finance-intro">Expected money in and out. These only feed the forecast. They are not transactions, a due date isn’t proof of payment, and changing one never changes a budget target.</p>{% endblock %}
+{% block budget_content %}
+{% macro fields(c=none) %}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% if c %}<input type="hidden" name="commitment_id" value="{{ c.id }}">{% endif %}
+  <label>Name<input name="name" maxlength="80" required value="{{ c.name if c }}"></label>
+  <label>Money<select name="direction"><option value="out" {{ 'selected' if not c or c.direction == 'out' }}>Out (bill)</option><option value="in" {{ 'selected' if c and c.direction == 'in' }}>In (payday)</option></select></label>
+  <label>Amount<input name="amount" inputmode="decimal" required value="{{ c.amount if c }}"></label>
+  <label>Amount is<select name="amount_kind">{% for k in kinds %}<option value="{{ k }}" {{ 'selected' if c and c.amount_kind == k }}>{{ k }}</option>{% endfor %}</select></label>
+  <label>Repeats<select name="cadence">{% for k in cadences %}<option value="{{ k }}" {{ 'selected' if (c and c.cadence == k) or (not c and k == 'monthly') }}>{{ k }}</option>{% endfor %}</select></label>
+  <label>Next date<input type="date" name="next_date" value="{{ c.next_date if c and c.next_date }}"><small>Leave blank if unknown; it stays out of the forecast.</small></label>
+  <label>Last date (optional)<input type="date" name="end_date" value="{{ c.end_date if c and c.end_date }}"><small>For financing that ends. Nothing is scheduled after it.</small></label>
+  <label>Paid from / into<select name="account_id"><option value="">Not set</option>{% for a in accounts %}<option value="{{ a.id }}" {{ 'selected' if c and c.account_id == a.id }}>{{ a.name }}</option>{% endfor %}</select></label>
+  <label>Category<select name="category_id"><option value="">None</option>{% for x in categories %}<option value="{{ x.id }}" {{ 'selected' if c and c.category_id == x.id }}>{{ '— ' if x.parent_id }}{{ x.name }}</option>{% endfor %}</select></label>
+  <label>Status<select name="status">{% for k in statuses %}<option value="{{ k }}" {{ 'selected' if (c and c.status == k) or (not c and k == 'active') }}>{{ k }}</option>{% endfor %}</select></label>
+  <label>Notes<input name="notes" maxlength="300" value="{{ c.notes if c }}"></label>
+{% endmacro %}
+<div class="finance-table-wrap"><table class="ledger-table"><thead><tr><th scope="col">Name</th><th scope="col" class="number">Amount</th><th scope="col">Repeats</th><th scope="col">Next</th><th scope="col">Account</th><th scope="col">Last actual</th><th scope="col">Status</th></tr></thead><tbody>
+{% for c in commitments %}<tr><th scope="row"><a href="#commitment-{{ c.id }}">{{ c.name }}</a>{% if c.notes %}<br><small>{{ c.notes }}</small>{% endif %}</th>
+  <td class="number {{ 'budget-in' if c.direction == 'in' }}">{{ '+' if c.direction == 'in' else '−' }}{{ c.amount|finance_amount }}<small class="budget-basis">{{ c.amount_kind }}</small></td>
+  <td>{{ c.cadence }}{% if c.end_date %}<br><small>until {{ c.end_date }}</small>{% endif %}</td>
+  <td>{% if c.next_date %}{{ c.next_date }}{% else %}<span class="budget-pill budget-pill--attention">Needs a date</span>{% endif %}</td>
+  <td>{{ c.account_name or '—' }}</td><td>{% set a = actuals.get(c.id) %}{% if a %}{{ a.amount|finance_amount }}<br><small>{{ a.date }}</small>{% else %}<span class="ledger-unset">—</span>{% endif %}</td><td>{{ c.status }}</td></tr>{% endfor %}
+</tbody></table></div>
+<div class="ledger-tools">
+  <details {% if error %}open{% endif %}><summary>Add a bill or payday</summary><form method="post" action="{{ url_for('finance_commitments') }}" class="ledger-form">{{ fields() }}<button class="btn btn--primary" type="submit">Add</button></form></details>
+  {% for c in commitments %}<details id="commitment-{{ c.id }}"><summary>Edit {{ c.name }}</summary><form method="post" action="{{ url_for('finance_commitments') }}" class="ledger-form">{{ fields(c) }}<button class="btn" type="submit">Save</button></form></details>{% endfor %}
+</div>
+{% endblock %}

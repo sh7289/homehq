@@ -1,0 +1,32 @@
+{% extends "finance_budget_base.html" %}
+{% block page_title %}Bonus planner{% endblock %}
+{% block heading %}Plan a bonus{% endblock %}
+{% block intro %}<p class="finance-intro">A starting point from your earlier plan, not an instruction. Check the shortfalls below first, adjust the shares, and tick only the lines you want to record. Nothing is saved until you do.</p>{% endblock %}
+{% block budget_content %}
+<form method="get" action="{{ url_for('finance_bonus') }}" class="ledger-form budget-bonus-form">
+  {% if income %}<label>Bonus received<select name="txn_id"><option value="">Type an amount instead</option>{% for i in income %}<option value="{{ i.id }}" {{ 'selected' if request.args.get('txn_id') == i.id|string }}>{{ i.date }} · {{ i.merchant }} · {{ i.amount|finance_amount }}</option>{% endfor %}</select></label>{% endif %}
+  <label>Amount after tax<input name="amount" inputmode="decimal" value="{{ amount }}" placeholder="0.00"></label>
+  {% for key, label, default in defaults %}<label>{{ label }} (%)<input name="share_{{ loop.index0 }}" inputmode="numeric" value="{{ shares[loop.index0] }}" size="4"></label>{% endfor %}
+  <button class="btn" type="submit">Show proposal</button>
+</form>
+{% if problem %}<p class="finance-notice" role="alert">{{ problem }}</p>{% endif %}
+
+<section class="budget-dimensions" aria-labelledby="context-title"><h2 id="context-title" class="budget-subhead">Shortfalls to consider first</h2><ul>
+  <li class="budget-dimension budget-dimension--{{ {'ok': 'good', 'shortfall': 'attention', 'unknown': 'unknown'}[reserve.state] }}"><span class="budget-pill budget-pill--dim-{{ {'ok': 'good', 'shortfall': 'attention', 'unknown': 'unknown'}[reserve.state] }}">{{ {'ok': 'Backed', 'shortfall': 'Shortfall', 'unknown': 'Unknown'}[reserve.state] }}</span><strong>Reserve funding</strong><span>{{ reserve.reason }}</span></li>
+  <li class="budget-dimension budget-dimension--{{ savings.state }}"><span class="budget-pill budget-pill--dim-{{ savings.state }}">{{ {'good': 'Good', 'attention': 'Attention', 'unknown': 'Unknown'}[savings.state] }}</span><strong>Savings progress</strong><span>{{ savings.message }}</span></li>
+  {% for name, f in funds.items() if f.plan.status in ('due', 'needs_monthly') %}<li class="budget-dimension budget-dimension--attention"><span class="budget-pill budget-pill--dim-attention">Gap</span><strong>{{ name }}</strong><span>{{ f.plan.gap|finance_amount }} short{% if f.goal.target_date %} for {{ f.goal.target_date }}{% endif %}.</span></li>{% endfor %}
+</ul></section>
+
+{% if proposal %}
+<form method="post" action="{{ url_for('finance_bonus') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="finance-table-wrap"><table class="ledger-table"><thead><tr><th scope="col">Record</th><th scope="col">Destination</th><th scope="col" class="number">Share</th><th scope="col" class="number">Proposed</th><th scope="col" class="number">Amount to record</th></tr></thead><tbody>
+  {% for line in proposal %}{% set fund = funds.get(line.key) %}<tr><td>{% if line.key == 'savings' %}<span class="ledger-unset">Transfer at your bank</span>{% elif fund and fund.setup_needed %}<span class="ledger-unset">Set up fund first</span>{% else %}<input type="checkbox" name="line" value="{{ loop.index0 }}" aria-label="Record {{ line.label }}">{% endif %}</td>
+    <th scope="row">{{ line.label }}</th><td class="number">{{ line.percent }}%</td><td class="number">{{ line.amount|finance_amount }}</td>
+    <td class="number">{% if line.key == 'savings' %}<span class="ledger-unset">—</span>{% else %}<input name="amount_{{ loop.index0 }}" inputmode="decimal" value="{{ line.amount }}" size="10" aria-label="Amount for {{ line.label }}" {{ 'disabled' if fund and fund.setup_needed }}>{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p class="finance-help">Ticked fund lines become contributions dated today. Moving money into savings is a transfer you make at your bank; it appears in savings progress once imported.</p>
+  <button class="btn btn--primary" type="submit">Record ticked lines</button>
+</form>
+{% endif %}
+{% endblock %}

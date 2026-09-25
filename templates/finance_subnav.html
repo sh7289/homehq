@@ -1,5 +1,5 @@
 <nav class="budget-subnav" aria-label="Finance sections">
-  {% for endpoint, label, key in [('finance','Accounts','overview'),('finance_budget','Budget','budget'),('finance_transactions','Transactions','transactions'),('finance_imports','Imports','imports'),('finance_budget_settings','Budget settings','settings')] %}
+  {% for endpoint, label, key in [('finance','Accounts','overview'),('finance_budget','Budget','budget'),('finance_transactions','Transactions','transactions'),('finance_funds','Funds','funds'),('finance_forecast','Forecast','forecast'),('finance_imports','Imports','imports'),('finance_budget_settings','Budget settings','settings')] %}
   <a href="{{ url_for(endpoint) }}"{% if (tab|default('overview')) == key %} aria-current="page"{% endif %}>{{ label }}</a>
   {% endfor %}
 </nav>

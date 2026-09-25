@@ -11,6 +11,35 @@
   <a href="{{ url_for('finance_budget', month=next_month) }}" rel="next">{{ next_month }} →</a>
 </nav>
 
+{% if d.exceptions %}<section class="budget-exceptions" role="alert" aria-labelledby="exceptions-title">
+  <h2 id="exceptions-title">Needs attention now</h2>
+  <ul>{% for e in d.exceptions %}<li>{{ e }}</li>{% endfor %}</ul>
+</section>{% endif %}
+
+<section class="budget-numbers" aria-label="Three numbers that stay separate">
+  <article><span class="finance-label">Remaining category budget</span><strong>{{ money(d.numbers.remaining_budget) }}</strong><span>Across this month’s allowances{% if s.quality != 'complete' %} · provisional{% endif %}</span></article>
+  <article><span class="finance-label">Available cash</span><strong>{{ money(d.numbers.available_cash) }}</strong><span>Checking{% if d.forecast.minimum %}, less your {{ d.forecast.minimum|finance_amount }} minimum{% endif %}{% if d.forecast.as_of %} · as of {{ d.forecast.as_of }}{% endif %}</span></article>
+  <article><span class="finance-label">Projected cash after commitments</span><strong>{{ money(d.numbers.projected_cash) }}</strong><span><a href="{{ url_for('finance_forecast') }}">Checking on {{ d.forecast.end_date }}</a>{% if d.forecast.state != 'ok' %} · {{ 'incomplete' if d.forecast.state == 'provisional' else 'unknown' }}{% endif %}{% if d.forecast.undated_out_monthly %} · leaves out about {{ d.forecast.undated_out_monthly|finance_amount }} a month of undated bills{% endif %}</span></article>
+</section>
+<p class="finance-help">These three answer different questions. Money left in a category is not money in checking, and cash in checking isn’t all free to spend.</p>
+
+<section class="budget-dimensions" aria-labelledby="dimensions-title">
+  <h2 id="dimensions-title" class="sr-only">How we’re doing</h2>
+  <ul>{% for x in d.dimensions %}<li class="budget-dimension budget-dimension--{{ x.state }}"><span class="budget-pill budget-pill--dim-{{ x.state }}">{{ {'good': 'Good', 'attention': 'Attention', 'unknown': 'Unknown'}[x.state] }}</span><strong>{{ x.label }}</strong><span>{{ x.message }}</span></li>{% endfor %}</ul>
+</section>
+
+{% if d.savings.fund_allocations or d.savings.actual is not none %}<p class="finance-help budget-savings-line">{% if d.savings.actual is not none %}Added to savings accounts this month: <strong>{{ d.savings.actual|finance_amount }}</strong>{% if d.savings.planned is not none %} of {{ d.savings.planned|finance_amount }} planned{% endif %}. {% endif %}Set aside in funds: {{ d.savings.fund_allocations|finance_amount }} (an allocation, not savings).</p>{% endif %}
+{% set targeted = d.allowances|rejectattr('no_target')|list %}
+{% if targeted %}<section class="budget-allowances" aria-labelledby="allowances-title">
+  <h2 id="allowances-title">Left to spend this month</h2>
+  <div class="budget-allowance-grid">{% for a in targeted %}
+    <article class="{{ 'budget-over-card' if a.remaining < 0 }}"><span class="finance-label">{{ a.name }}</span>
+      <strong>{{ a.remaining|finance_amount }}</strong>
+      <span>of {{ a.available|finance_amount }}{% if a.carry_in %} ({{ a.target|finance_amount }} + {{ a.carry_in|finance_amount }} carried){% endif %} · {{ a.spent|finance_amount }} spent</span>
+      {% if a.pct_used is not none %}<span class="budget-meter" aria-hidden="true"><span style="width: {{ [a.pct_used, 100]|min }}%"></span></span>{% endif %}
+    </article>{% endfor %}</div>
+</section>{% endif %}
+
 <section class="budget-quality budget-quality--{{ s.quality }}" aria-labelledby="quality-title">
   <h2 id="quality-title"><span class="budget-pill budget-pill--{{ s.quality }}">{{ quality_labels[s.quality] }}</span> Data for this month</h2>
   {% if s.quality == 'complete' %}<p>Every included account has transactions for this month and everything is reviewed.</p>
@@ -26,6 +55,7 @@
   <article><span class="finance-label">Not yet categorized</span><strong>{{ s.uncategorized.amount|finance_amount }}</strong><span>{% if s.uncategorized.count %}<a href="{{ url_for('finance_transactions', month=s.month) }}">{{ s.uncategorized.count }} to review</a>{% else %}Nothing waiting{% endif %}</span></article>
   <article><span class="finance-label">Income recorded</span><strong>{{ s.income|finance_amount }}</strong><span>{% if s.unreviewed_inflows.count %}{{ s.unreviewed_inflows.amount|finance_amount }} in unreviewed deposits{% else %}Categorized as income{% endif %}</span></article>
 </section>
+{% if s.funding.hsa %}<p class="finance-help">Of {{ s.funding.total|finance_amount }} spending, {{ s.funding.hsa|finance_amount }} was paid from the HSA and {{ s.funding.everyday|finance_amount }} from everyday accounts.</p>{% endif %}
 <p class="finance-help">Known spending includes uncategorized purchases. Transfers and card payments are not spending: the purchases they pay for are counted when they happen.</p>
 
 <section class="budget-plan budget-plan--{{ s.plan.label }}" aria-labelledby="plan-title">
@@ -40,7 +70,7 @@
   {% if s.plan.unvalidated %}<p class="finance-help">{{ s.plan.unvalidated }} plan line{{ ' is a planning value or estimate' if s.plan.unvalidated == 1 else 's are planning values or estimates' }}, not {{ 'an amount' if s.plan.unvalidated == 1 else 'amounts' }} confirmed from your transaction history.</p>{% endif %}
 </section>
 
-{% for group, title, note in [('capped', 'Monthly allowances', 'Spending against the few areas with deliberate limits.'), ('operating', 'Operating costs', 'Normal household costs, watched for change rather than capped.'), ('sinking', 'Sinking-fund spending', 'Spending from reserves this month. Fund balances arrive in a later update.'), ('income', 'Income', ''), ('savings', 'Savings', ''), ('other', 'Other', '')] %}
+{% for group, title, note in [('capped', 'Monthly allowances', 'Spending against the few areas with deliberate limits.'), ('operating', 'Operating costs', 'Normal household costs, watched for change rather than capped.'), ('sinking', 'Sinking-fund spending', 'Spending from reserves this month. See Funds for balances.'), ('income', 'Income', ''), ('savings', 'Savings', ''), ('other', 'Other', '')] %}
 {% set rows = s.categories|selectattr('type', 'equalto', group)|list %}
 {% if rows %}
 <section class="ledger-section" aria-labelledby="group-{{ group }}">
@@ -58,5 +88,6 @@
 </section>
 {% endif %}
 {% endfor %}
+<p class="budget-exports">Download this month: <a href="{{ url_for('finance_export_transactions', month=s.month) }}">transactions (CSV)</a> · <a href="{{ url_for('finance_export_categories', month=s.month) }}">category totals (CSV)</a>. Downloads contain private household financial data.</p>
 {% if s.other_currencies %}<p class="finance-notice">Also recorded in other currencies (not converted or included above): {% for code, amount in s.other_currencies.items() %}{{ amount|finance_amount }} {{ code }}{{ ', ' if not loop.last }}{% endfor %}.</p>{% endif %}
 {% endblock %}

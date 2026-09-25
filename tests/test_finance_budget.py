@@ -94,7 +94,7 @@ def test_targets_are_effective_dated_and_past_is_immutable(tmp_path):
     b.set_target(conn, category_id=dining, effective_month='2027-02', amount='700', basis='planning', note='', actor='alice', today=date(2026, 12, 5))
     assert b.target_for(conn, dining, '2027-01')['amount'] == Decimal('650.00')
     assert b.target_for(conn, dining, '2027-03')['amount'] == Decimal('700.00')
-    assert b.target_for(conn, dining, '2026-10') is None
+    assert b.target_for(conn, dining, '2026-09') is None
     with pytest.raises(FinanceStoreError):
         b.set_target(conn, category_id=dining, effective_month='2026-11', amount='1', basis='planning', note='', actor='alice', today=date(2026, 12, 5))
     with pytest.raises(FinanceStoreError):
@@ -136,3 +136,53 @@ def test_people_and_coverage(tmp_path):
         b.declare_coverage(conn, account_id=CHECKING, start='2026-11-02', end='2026-11-01', actor='s', today=date(2026, 12, 1))
     with pytest.raises(FinanceStoreError):
         b.declare_coverage(conn, account_id=CHECKING, start='2026-11-01', end='2026-12-05', actor='s', today=date(2026, 12, 1))
+
+
+def test_seeds_start_in_october_with_tirzepatide(tmp_path):
+    import finance_budget as b
+    conn = ledger_db(tmp_path)
+    months = {r[0] for r in conn.execute("SELECT effective_month FROM finance_budget_targets WHERE created_by='seed'")}
+    assert months == {'2026-10'}
+    assert b.get_setting(conn, 'budget_start') == '2026-10-01'
+    tirz = b.target_for(conn, cat(conn, 'Tirzepatide'), '2026-10')
+    assert (tirz['amount'], tirz['basis']) == (Decimal('199.67'), 'estimate')
+    assert 'HSA' in tirz['note']
+    health = cat(conn, 'Health and medical')
+    parents = {r['name']: r['parent_id'] for r in conn.execute('SELECT name, parent_id FROM finance_budget_categories')}
+    assert parents['Tirzepatide'] == health and parents['Routine medical'] == health
+    assert b.target_for(conn, cat(conn, 'Routine medical'), '2026-10') is None
+
+
+def test_november_seed_database_moves_to_october_without_touching_edits(tmp_path):
+    import finance_budget as b
+    conn = ledger_db(tmp_path)
+    # Recreate a database seeded by the first release: November seeds, no medical children.
+    conn.execute('DELETE FROM finance_recurring')
+    conn.execute("UPDATE finance_budget_targets SET effective_month='2026-11' WHERE created_by='seed'")
+    conn.execute("DELETE FROM finance_budget_targets WHERE category_id IN (SELECT id FROM finance_budget_categories "
+                 "WHERE name IN ('Tirzepatide','Routine medical'))")
+    conn.execute("DELETE FROM finance_budget_categories WHERE name IN ('Tirzepatide','Routine medical')")
+    conn.execute("UPDATE finance_budget_settings SET value='2026-11-01' WHERE key='budget_start'")
+    conn.execute("DELETE FROM finance_budget_settings WHERE key='seed_version'")
+    conn.commit()
+    dining = cat(conn, 'Shared dining and entertainment')
+    b.set_target(conn, category_id=dining, effective_month='2026-11', amount='700', basis='planning', note='', actor='alice',
+                 today=date(2026, 9, 24))
+    b.initialize(conn)
+    b.initialize(conn)
+    assert b.target_for(conn, cat(conn, 'Mortgage'), '2026-10')['amount'] == Decimal('2910.21')
+    assert b.target_for(conn, dining, '2026-10') is None
+    assert b.target_for(conn, dining, '2026-11')['amount'] == Decimal('700.00')
+    assert b.get_setting(conn, 'budget_start') == '2026-10-01'
+    assert b.target_for(conn, cat(conn, 'Tirzepatide'), '2026-10')['amount'] == Decimal('199.67')
+    assert conn.execute("SELECT COUNT(*) FROM finance_budget_categories WHERE name='Tirzepatide'").fetchone()[0] == 1
+
+
+def test_user_changed_start_date_is_kept(tmp_path):
+    import finance_budget as b
+    conn = ledger_db(tmp_path)
+    conn.execute("UPDATE finance_budget_settings SET value='2027-01-01' WHERE key='budget_start'")
+    conn.execute("DELETE FROM finance_budget_settings WHERE key='seed_version'")
+    conn.commit()
+    b.initialize(conn)
+    assert b.get_setting(conn, 'budget_start') == '2027-01-01'
