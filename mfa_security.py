@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS mfa_recovery (
 );
 """
 
+# How long one successful code unlocks Finance, counted from when it was entered.
+MFA_WINDOW_SECONDS = 4 * 60 * 60
+
 
 def fingerprint(secret):
     return hashlib.sha256(secret.encode('ascii')).hexdigest()
@@ -105,7 +108,7 @@ def has_recent_mfa():
     stamp = grant.get('at')
     return (grant.get('username') == current_user.id
             and hmac.compare_digest(stored_fingerprint, fingerprint(secret))
-            and isinstance(stamp, (int, float)) and 0 <= time.time() - stamp <= 900
+            and isinstance(stamp, (int, float)) and 0 <= time.time() - stamp <= MFA_WINDOW_SECONDS
             and bool(_enrolled(_connection(), current_user.id, secret)))
 
 

@@ -92,6 +92,22 @@ password manager. Repeat for slot 2 with a different output directory and
 once authenticator and recovery access are verified. Do not share one user's secret
 with the other. A fresh output directory is required for rotation.
 
+**Adding the account to Microsoft Authenticator.** Either way below, the secret goes
+straight from the server terminal to the phone. Don't photograph it, message it, or
+paste it anywhere.
+- **Scan:** install `qrencode` once (`sudo apt install qrencode`). Then show the code in
+  the SSH terminal with
+  `sudo sed -n 3p /home/homehq/ENROLLMENT_DIR/provisioning.txt | qrencode -t ansiutf8`.
+  In the app, tap **+**, choose **Other account (Google, Facebook, etc.)**, then
+  **Scan a QR code**.
+- **Type it in:** in the app, tap **+**, choose **Other account**, then **Or enter code
+  manually**. Enter an account name such as "Home HQ" and, as the secret key, the
+  "Manual setup secret" line from `provisioning.txt`. The app assumes 6-digit, 30-second
+  codes, which is what Home HQ uses.
+
+A Finance unlock lasts 4 hours from entering the code (`MFA_WINDOW_SECONDS` in
+`mfa_security.py`).
+
 Install the updated app service, which loads optional per-user MFA environment
 files. It must NOT load `.homehq-finance.env`.
 

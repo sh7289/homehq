@@ -55,7 +55,10 @@ def test_challenge_success_expiry_and_replay(enrolled, monkeypatch):
     other = enrolled.test_client()
     login(other)
     assert verify(other, code).status_code == 401
-    monkeypatch.setattr(mfa.time, 'time', lambda: 1800000901)
+    # The unlock lasts four hours from entering the code, then asks again.
+    monkeypatch.setattr(mfa.time, 'time', lambda: 1800000000 + 4 * 3600 - 60)
+    assert client.get('/private-test').status_code == 200
+    monkeypatch.setattr(mfa.time, 'time', lambda: 1800000000 + 4 * 3600 + 1)
     assert '/mfa' in client.get('/private-test').location
 
 

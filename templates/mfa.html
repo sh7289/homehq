@@ -5,7 +5,7 @@
 <section class="card card--narrow">
   <p class="eyebrow">Private finance</p>
   <h1>Verify it’s you</h1>
-  <p>Use your authenticator to unlock financial balances for 15 minutes.</p>
+  <p>Use your authenticator to unlock financial balances for 4 hours.</p>
   {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
   {% if enrolled %}
   <form method="post" action="{{ url_for('mfa') }}">
