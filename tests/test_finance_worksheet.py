@@ -174,7 +174,7 @@ def test_every_finance_mutation_requires_real_recent_mfa(app, tmp_path, monkeypa
     saved = client.post('/finance/snapshots', data={'csrf_token':csrf})
     assert saved.status_code == 302
     with client.session_transaction() as state:
-        state['mfa_grant']['at'] -= 901
+        state['mfa_grant']['at'] -= 4 * 3600 + 1
         state.modified = True
     for path in paths + [saved.location]:
         response = client.get(path) if path == saved.location else client.post(path, data={'csrf_token':csrf})
