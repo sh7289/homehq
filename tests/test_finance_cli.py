@@ -152,3 +152,60 @@ def test_sync_lock_contention_exits_safely(tmp_path):
 
     assert result.returncode == 2
     assert result.stderr == "Finance sync is already running.\n"
+
+
+def _live_db(tmp_path):
+    from test_finance_budget import ledger_db
+    conn = ledger_db(tmp_path)
+    finance_store.set_store_mode(conn, "live")
+    conn.close()
+    return {"HOMEHQ_FINANCE_DB_PATH": str(tmp_path / "private" / "finance.db"),
+            "HOMEHQ_SIMPLEFIN_ACCESS_URL": "https://u:p@bridge.simplefin.org/simplefin"}
+
+
+def _balances():
+    from test_finance_budget import CHECKING, CARD_S, CARD_H
+    return {"accounts": [{"id": i, "label": "x", "currency": "USD", "balance": Decimal("5"),
+                          "balance_at": "2026-11-02T00:00:00Z"} for i in (CHECKING, CARD_S, CARD_H)],
+            "warnings": [], "complete": True}
+
+
+def test_live_sync_stores_posted_transactions_for_budget_accounts(tmp_path):
+    from datetime import date
+    from scripts import sync_finance
+    from test_finance_budget import CARD_S
+
+    asked = []
+
+    def fetch_feed(credential, start):
+        asked.append(start)
+        return _balances(), {CARD_S: {"complete": True, "transactions": [dict(
+            id_hash="1" * 64, txn_date="2026-10-05", posted_date="2026-10-05", amount=Decimal("-42.10"),
+            description="TRADER JOES")]}}
+
+    out = []
+    code = sync_finance.main([], environ=_live_db(tmp_path), fetch_feed=fetch_feed, today=date(2026, 10, 9),
+                             stdout=type("W", (), {"write": lambda self, t: out.append(t)})())
+    assert code == 0 and asked == ["2026-10-01"]
+    conn = finance_store.connect(str(tmp_path / "private" / "finance.db"))
+    assert conn.execute("SELECT amount FROM finance_txns").fetchone()["amount"] == "-42.10"
+    assert conn.execute("SELECT balance FROM finance_accounts WHERE id=?", (CARD_S,)).fetchone()["balance"] == "5"
+
+
+def test_transaction_failure_keeps_balances_and_exits_nonzero(tmp_path, monkeypatch):
+    from datetime import date
+    import finance_bank_feed
+    from scripts import sync_finance
+    from test_finance_budget import CARD_S
+
+    def broken(*args, **kwargs):
+        raise finance_store.FinanceStoreError("boom")
+
+    monkeypatch.setattr(finance_bank_feed, "record", broken)
+    errors = []
+    code = sync_finance.main([], environ=_live_db(tmp_path), fetch_feed=lambda c, s: (_balances(), {}),
+                             today=date(2026, 10, 9), stderr=type("W", (), {"write": lambda self, t: errors.append(t)})())
+    assert code == 1
+    assert "transactions could not be recorded" in "".join(errors)
+    conn = finance_store.connect(str(tmp_path / "private" / "finance.db"))
+    assert conn.execute("SELECT balance FROM finance_accounts WHERE id=?", (CARD_S,)).fetchone()["balance"] == "5"

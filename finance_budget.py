@@ -81,7 +81,7 @@ CREATE INDEX IF NOT EXISTS finance_txns_date ON finance_txns(txn_date);
 CREATE TABLE IF NOT EXISTS finance_source_records (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   batch_id INTEGER REFERENCES finance_import_batches(id),
-  account_id TEXT NOT NULL, source TEXT NOT NULL CHECK (source IN ('csv','manual')),
+  account_id TEXT NOT NULL, source TEXT NOT NULL CHECK (source IN ('csv','manual','sync')),
   source_txn_hash TEXT, fingerprint TEXT NOT NULL, occurrence INTEGER NOT NULL,
   columns_json TEXT NOT NULL,
   txn_id INTEGER NOT NULL REFERENCES finance_txns(id) ON DELETE CASCADE);
@@ -205,8 +205,27 @@ def is_initialized(conn):
     return TABLES <= tables
 
 
+def _allow_sync_source(conn):
+    """Rebuild finance_source_records so its source check also admits bank-sync rows.
+
+    SQLite cannot alter a CHECK constraint, so the table is copied into the new
+    definition. Nothing references this table, and its indexes are recreated by
+    the schema statements that run next.
+    """
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='finance_source_records'").fetchone()
+    if row is None or "'sync'" in row[0]:
+        return
+    start = SCHEMA.index('CREATE TABLE IF NOT EXISTS finance_source_records')
+    definition = SCHEMA[start:SCHEMA.index(';', start)].replace('finance_source_records', 'finance_source_records_new', 1)
+    conn.execute(definition)
+    conn.execute('INSERT INTO finance_source_records_new SELECT * FROM finance_source_records')
+    conn.execute('DROP TABLE finance_source_records')
+    conn.execute('ALTER TABLE finance_source_records_new RENAME TO finance_source_records')
+
+
 def initialize(conn):
     with _transaction(conn):
+        _allow_sync_source(conn)
         for statement in SCHEMA.split(';'):
             if statement.strip():
                 conn.execute(statement)
