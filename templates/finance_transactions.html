@@ -5,6 +5,7 @@
 {% block budget_head %}<script src="{{ url_for('static', filename='js/finance-quick.js') }}" defer></script>{% endblock %}
 {% block budget_content %}
 {% if accepted %}<p class="finance-notice" role="status">Accepted {{ accepted }} suggestion{{ '' if accepted == '1' else 's' }}.</p>{% endif %}
+<details class="budget-filter-fold" open{{ ' data-active' if month or account or category }}><summary>Filters{% if month or account or category %} · active{% endif %}</summary>
 <form class="budget-filters" method="get" action="{{ url_for('finance_transactions') }}">
   <label>Show<select name="view"><option value="review" {{ 'selected' if view == 'review' }}>Needs review</option><option value="all" {{ 'selected' if view == 'all' }}>All transactions</option></select></label>
   <label>Month<input type="month" name="month" value="{{ month }}"></label>
@@ -12,6 +13,7 @@
   <label>Category<select name="category"><option value="">All categories</option>{% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if category == c.id|string }}>{{ '— ' if c.parent_id }}{{ c.name }}</option>{% endfor %}</select></label>
   <button class="btn" type="submit">Filter</button>
 </form>
+</details>
 {% if rows %}
 <form method="post" action="{{ url_for('finance_categorize') }}" class="budget-quick">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
