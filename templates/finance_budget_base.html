@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{% block page_title %}Budget{% endblock %} · Finance · Home HQ{% endblock %}
 {% block fonts %}{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/finance.css') }}">{% block budget_head %}{% endblock %}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/finance.css') }}"><script src="{{ url_for('static', filename='js/finance-layout.js') }}" defer></script>{% block budget_head %}{% endblock %}{% endblock %}
 {% block content %}
 <div class="finance">
   <header class="finance-heading"><div><p class="finance-eyebrow">Household ledger / private</p><h1>{% block heading %}Budget{% endblock %}</h1>{% block intro %}{% endblock %}</div>{% block actions %}{% endblock %}</header>

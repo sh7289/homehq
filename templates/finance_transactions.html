@@ -2,8 +2,11 @@
 {% block page_title %}Transactions{% endblock %}
 {% block heading %}Transactions{% endblock %}
 {% block actions %}<div class="budget-actions"><a class="btn" href="{{ url_for('finance_imports') }}">Import CSV</a><a class="btn btn--primary" href="{{ url_for('finance_txn_new') }}">Add transaction</a></div>{% endblock %}
+{% block budget_head %}<script src="{{ url_for('static', filename='js/finance-quick.js') }}" defer></script>{% endblock %}
 {% block budget_content %}
+{% if caught_up %}<p class="finance-notice" role="status">All caught up — nothing left to review.</p>{% endif %}
 {% if accepted %}<p class="finance-notice" role="status">Accepted {{ accepted }} suggestion{{ '' if accepted == '1' else 's' }}.</p>{% endif %}
+<details class="budget-filter-fold" open{{ ' data-active' if month or account or category }}><summary>Filters{% if month or account or category %} · active{% endif %}</summary>
 <form class="budget-filters" method="get" action="{{ url_for('finance_transactions') }}">
   <label>Show<select name="view"><option value="review" {{ 'selected' if view == 'review' }}>Needs review</option><option value="all" {{ 'selected' if view == 'all' }}>All transactions</option></select></label>
   <label>Month<input type="month" name="month" value="{{ month }}"></label>
@@ -11,30 +14,49 @@
   <label>Category<select name="category"><option value="">All categories</option>{% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if category == c.id|string }}>{{ '— ' if c.parent_id }}{{ c.name }}</option>{% endfor %}</select></label>
   <button class="btn" type="submit">Filter</button>
 </form>
-{% set suggested = rows|selectattr('review', 'equalto', 'suggested')|list %}
+</details>
 {% if rows %}
-<form method="post" action="{{ url_for('finance_accept_suggested') }}">
+<form method="post" action="{{ url_for('finance_categorize') }}" class="budget-quick">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  {% if suggested %}<div class="budget-bulk"><p>{{ suggested|length }} suggestion{{ 's' if suggested|length != 1 }} based on how you categorized the same merchant before. Uncheck any you’d rather review one by one.</p><button class="btn btn--primary" type="submit">Accept checked suggestions</button></div>{% endif %}
+  {% for key, value in [('view', view), ('month', month), ('account', account), ('category', category)] %}{% if value %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}{% endfor %}
+  {% if saved %}<p class="finance-notice" role="status">Saved {{ saved }} categor{{ 'y' if saved == '1' else 'ies' }}.</p>{% endif %}
   <div class="finance-table-wrap"><table class="ledger-table budget-inbox">
-    <thead><tr><th scope="col"><span class="sr-only">Accept</span></th><th scope="col">Date</th><th scope="col">Description</th><th scope="col">Account</th><th scope="col" class="number">Amount</th><th scope="col">Category</th></tr></thead>
+    <thead><tr><th scope="col">Transaction</th><th scope="col" class="number">Amount</th><th scope="col">Category</th></tr></thead>
     <tbody>{% for t in rows %}
-      <tr class="budget-row--{{ t.status }}">
-        <td>{% if t.review == 'suggested' %}<input type="checkbox" name="txn_id" value="{{ t.id }}" checked aria-label="Accept suggestion for {{ t.merchant }}">{% endif %}</td>
-        <td><time>{{ t.txn_date }}</time></td>
-        <th scope="row"><a href="{{ url_for('finance_txn', txn_id=t.id) }}">{{ t.merchant }}</a>
+      {% set quick = t.review != 'accepted' and t.kind not in ('transfer', 'card_payment') and not t.possible_duplicate_of and t.lines <= 1 %}
+      <tr class="budget-row--{{ t.status }}{{ ' budget-row--error' if row_errors.get(t.id|string) }}">
+        <th scope="row" class="budget-cell-desc"><a href="{{ url_for('finance_txn', txn_id=t.id) }}">{{ t.merchant }}</a>
           {% if t.status != 'posted' %}<span class="budget-pill budget-pill--{{ t.status }}">{{ t.status|title }}</span>{% endif %}
           {% if t.possible_duplicate_of %}<span class="budget-pill budget-pill--attention">Possible duplicate</span>{% endif %}
-          {% if t.kind in ('transfer', 'card_payment') and not t.link_count %}<span class="budget-pill budget-pill--attention">Unmatched {{ 'card payment' if t.kind == 'card_payment' else 'transfer' }}</span>{% endif %}</th>
-        <td>{{ t.account_name }}</td>
-        <td class="number {{ 'budget-in' if t.amount > 0 }}">{{ t.amount|finance_amount }}</td>
-        <td>{% if t.review == 'suggested' %}<span class="budget-pill budget-pill--suggested">Suggested</span> {{ t.suggested_name }}
-          {% elif t.kind in ('transfer', 'card_payment') %}{{ 'Card payment' if t.kind == 'card_payment' else 'Transfer' }}
+          {% if t.kind in ('transfer', 'card_payment') and not t.link_count %}<span class="budget-pill budget-pill--attention">Unmatched {{ 'card payment' if t.kind == 'card_payment' else 'transfer' }}</span>{% endif %}
+          <span class="budget-meta"><time datetime="{{ t.txn_date }}">{{ t.txn_date }}</time> · {{ t.account_name }}</span></th>
+        <td class="number budget-cell-amount {{ 'budget-in' if t.amount > 0 }}">{{ t.amount|finance_amount }}</td>
+        <td class="budget-cell-category">{% if quick %}
+          {% set chosen = request.form.get('category_' ~ t.id, (t.suggested_category_id or '')|string) %}
+          {% set who = request.form.get('person_' ~ t.id, t.suggested_person if t.review == 'suggested' and t.suggested_person else '') %}
+          <input type="hidden" name="txn_id" value="{{ t.id }}">
+          <div class="budget-pick">
+            <label><span class="sr-only">Category for {{ t.merchant }}</span><select name="category_{{ t.id }}" data-quick-category>
+              <option value="">Choose a category…</option>
+              {% for c in pickable %}<option value="{{ c.id }}" data-person="{{ c.default_person or 'shared' }}" {{ 'selected' if chosen == c.id|string }}>{{ '— ' if c.parent_id }}{{ c.name }}</option>{% endfor %}
+            </select></label>
+            <label><span class="sr-only">Person for {{ t.merchant }}</span><select name="person_{{ t.id }}" data-quick-person>
+              <option value="">Default person</option>
+              {% for p in people %}<option value="{{ p }}" {{ 'selected' if who == p }}>{{ p|title }}</option>{% endfor %}
+            </select></label>
+          </div>
+          {% if t.review == 'suggested' and chosen == (t.suggested_category_id or '')|string %}<span class="budget-pill budget-pill--suggested">Suggested</span>{% endif %}
+          {% if row_errors.get(t.id|string) %}<p class="budget-row-error" role="alert">{{ row_errors[t.id|string] }}</p>{% endif %}
+          {% else %}
+          {% if t.kind in ('transfer', 'card_payment') %}{{ 'Card payment' if t.kind == 'card_payment' else 'Transfer' }}
           {% elif t.lines > 1 %}Split ({{ t.lines }}): {{ t.category_names }}
           {% elif t.lines == 1 %}{{ t.category_names }}
-          {% else %}<span class="ledger-unset">Needs a category</span>{% endif %}</td>
+          {% else %}<span class="ledger-unset">Needs a decision</span>{% endif %}
+          {% if t.review != 'accepted' or t.possible_duplicate_of %} <a class="btn btn--small" href="{{ url_for('finance_txn', txn_id=t.id, next=request.full_path) }}">Open</a>{% endif %}
+          {% endif %}</td>
       </tr>{% endfor %}</tbody>
   </table></div>
+  {% if rows|selectattr('review', 'ne', 'accepted')|list %}<div class="budget-savebar"><p>Rows left on “Choose a category…” stay in the inbox.</p><button class="btn btn--primary" type="submit">Save categories</button></div>{% endif %}
 </form>
 {% if rows|length >= 200 %}<p class="finance-help">Showing the newest 200. Filter by month or account to see more.</p>{% endif %}
 {% else %}

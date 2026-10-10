@@ -156,6 +156,8 @@
   font-size:.9rem
 }
 .finance-table-wrap {
+  /* Contain absolutely positioned screen-reader labels, or they widen the page on phones. */
+  position: relative;
   overflow-x:auto
 }
 .finance table {
@@ -344,7 +346,19 @@
 .budget-filters input, .budget-filters select, .budget-inline input, .budget-inline select, .budget-lines select, .budget-lines input, .budget-note textarea, .ledger-form textarea { box-sizing: border-box; min-height: 40px; border: 1px solid #bcb3a5; border-radius: 4px; padding: .45rem; background: #fffdf7; color: #3b342c; font: inherit; }
 .budget-bulk { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; padding: .8rem 1rem; background: #f3ead7; border-radius: 6px; margin-bottom: 1rem; font-size: .85rem; }
 .budget-bulk p { margin: 0; }
-.budget-inbox td:first-child { width: 2rem; }
+.budget-pick { display: flex; flex-wrap: wrap; gap: .4rem; }
+.budget-pick select { box-sizing: border-box; min-height: 40px; max-width: 100%; border: 1px solid #bcb3a5; border-radius: 4px; padding: .4rem; background: #fffdf7; color: #3b342c; font: inherit; }
+.budget-pick label:first-child { flex: 1 1 13rem; }
+.budget-pick label:first-child select { width: 100%; }
+.budget-pick label:last-child select { width: 9.5rem; }
+.budget-inbox .budget-meta { display: block; margin-top: .25rem; color: #706555; font-size: .75rem; font-weight: 400; }
+.budget-inbox tbody th { white-space: normal; }
+.finance .ledger-table td.budget-target-cell { white-space: normal; max-width: 12rem; }
+.budget-row-error { margin: .35rem 0 0; color: #8a3b2e; font-size: .78rem; white-space: normal; }
+.budget-row--error td, .budget-row--error th { background: #fbefe9; }
+.budget-savebar { position: sticky; bottom: 0; z-index: 2; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; padding: .8rem 1rem; margin-top: .8rem; background: #f3ead7; border-top: 1px solid #d8d0c4; border-radius: 6px; font-size: .85rem; }
+.budget-savebar p { margin: 0; color: #5a5046; }
+.finance .btn--small { min-height: 0; padding: .3rem .7rem; font-size: .75rem; }
 .budget-inbox .budget-pill { margin-left: .35rem; }
 .budget-row--pending td, .budget-row--pending th { background: #fbf7ee; }
 .budget-classify { display: grid; gap: 1rem; padding: 1rem 0; }
@@ -429,3 +443,57 @@
 .finance .budget-subhead { font: 500 1.1rem/1.3 Georgia, serif; margin: 1.5rem 0 .2rem; }
 .budget-bonus-form { margin-bottom: 1rem; }
 .budget-savings-line { margin-top: -.2rem; }
+@media (min-width: 1000px) {
+  .budget-pick { flex-wrap: nowrap; }
+  .budget-pick label:first-child { flex: 0 0 15rem; }
+  .budget-pick label:last-child select { width: 8.5rem; }
+}
+
+@media (max-width: 859px) {
+  /* Sit above the fixed bottom tab bar instead of underneath it. */
+  .budget-savebar { bottom: calc(3.5rem + env(safe-area-inset-bottom)); }
+}
+
+/* Collapsible panels (settings sections, transaction filters) */
+.ledger-fold > summary, .budget-filter-fold > summary { cursor: pointer; list-style: none; }
+.ledger-fold > summary::-webkit-details-marker, .budget-filter-fold > summary::-webkit-details-marker { display: none; }
+.ledger-fold > summary h2::after { content: '–'; margin-left: .6rem; color: #9a9184; font-weight: 400; }
+.ledger-fold:not([open]) > summary h2::after { content: '+'; }
+.budget-filter-fold > summary { display: none; }
+
+@media (max-width: 650px) {
+  /* Tables become one card per row; each cell shows its column name. */
+  .finance .ledger-table.is-stacked { min-width: 0; }
+  .ledger-table.is-stacked thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+  .ledger-table.is-stacked tbody, .ledger-table.is-stacked tfoot { display: block; }
+  .ledger-table.is-stacked tr { display: grid; grid-template-columns: 1fr 1fr; gap: .45rem 1rem; padding: .9rem .2rem; border-bottom: 1px solid #d8d0c4; }
+  .finance .ledger-table.is-stacked td, .finance .ledger-table.is-stacked th { display: block; padding: 0; min-width: 0; white-space: normal; text-align: left; }
+  .finance .ledger-table.is-stacked tbody th, .finance .ledger-table.is-stacked td[colspan] { grid-column: 1 / -1; }
+  .ledger-table.is-stacked td[data-label]::before { content: attr(data-label); display: block; font-size: .66rem; letter-spacing: .05em; text-transform: uppercase; color: #706555; }
+  .ledger-table.is-stacked td:empty { display: none; }
+  .ledger-table.is-stacked tbody tr:hover { background: none; }
+  .finance .ledger-table.is-stacked td, .finance .ledger-table.is-stacked th { border: 0; }
+
+  /* Budget rows: Target, Spent and Used on one line; Spent already includes posted and pending. */
+  .budget-table.is-stacked tr { grid-template-columns: repeat(3, 1fr); padding: .7rem .2rem; }
+  .budget-table.is-stacked td:nth-child(3), .budget-table.is-stacked td:nth-child(4) { display: none; }
+
+  /* Inbox cards: description and amount on top, the pickers full width below. */
+  .budget-inbox.is-stacked tr { grid-template-columns: 1fr auto; }
+  .finance .budget-inbox.is-stacked tbody th { grid-column: 1; grid-row: 1; }
+  .finance .budget-inbox.is-stacked .budget-cell-amount { grid-column: 2; grid-row: 1; text-align: right; font-size: .95rem; }
+  .budget-inbox.is-stacked .budget-cell-category { grid-column: 1 / -1; }
+  .ledger-table.budget-inbox.is-stacked td[data-label]::before { content: none; }
+  .budget-pick { flex-wrap: nowrap; }
+  .budget-pick label:first-child { flex: 1 1 auto; min-width: 0; }
+  .budget-pick label:last-child { flex: 0 0 7.5rem; }
+  .budget-pick label:last-child select { width: 100%; }
+  .budget-pick select { font-size: 16px; } /* 16px stops iOS zooming into the field */
+  .budget-savebar { margin: .8rem -.2rem 0; border-radius: 0; }
+  .budget-savebar p { flex-basis: 100%; }
+  .budget-savebar .btn { width: 100%; }
+
+  .budget-filter-fold > summary { display: inline-block; margin-bottom: .8rem; padding: .45rem .9rem; border: 1px solid #bcb3a5; border-radius: 4px; font-size: .85rem; }
+  .budget-filters label { flex: 1 1 45%; }
+  .budget-filters select, .budget-filters input { width: 100%; }
+}

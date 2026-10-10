@@ -194,6 +194,32 @@ def accept_suggestion(conn, txn_id, actor):
             category_id=txn['suggested_category_id'], person=txn['suggested_person'], amount=Decimal(txn['amount']))])
 
 
+def quick_classify(conn, txn_id, *, category_id, person, actor):
+    """One category line for the whole amount, as picked from the inbox list.
+
+    Money out is an expense; money in is income for an income category and a
+    reimbursement otherwise. A blank person takes the category's default. Rows
+    that need the full page (links, splits, possible duplicates) are refused.
+    """
+    with _transaction(conn):
+        txn = _txn(conn, txn_id)
+        if (txn['kind'] in MOVEMENT_KINDS or txn['possible_duplicate_of'] is not None or _movement_link(conn, txn['id'])
+                or conn.execute('SELECT COUNT(*) FROM finance_txn_allocations WHERE txn_id=?', (txn['id'],)).fetchone()[0] > 1):
+            raise FinanceStoreError('Open this transaction to categorize it.')
+        category = finance_budget._category(conn, category_id)
+        person = person or category['default_person'] or 'shared'
+        amount = Decimal(txn['amount'])
+        if (txn['review'] == 'suggested' and category['id'] == txn['suggested_category_id']
+                and person == txn['suggested_person'] and txn['suggested_kind']):
+            kind = txn['suggested_kind']
+        elif amount < 0:
+            kind = 'expense'
+        else:
+            kind = 'income' if category['type'] == 'income' else 'reimbursement'
+        classify(conn, txn['id'], kind=kind, actor=actor,
+                 allocations=[dict(category_id=category['id'], person=person, amount=amount)])
+
+
 def accept_suggestions(conn, txn_ids, actor):
     count = 0
     with _transaction(conn):

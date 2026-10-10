@@ -3,8 +3,8 @@
 {% block heading %}Budget settings{% endblock %}
 {% block intro %}<p class="finance-intro">Which accounts count, what each category means, and what you planned. Past targets are kept as they were.</p>{% endblock %}
 {% block budget_content %}
-<section class="ledger-section" id="accounts" aria-labelledby="accounts-title">
-  <header class="ledger-section-title"><h2 id="accounts-title">Accounts in the budget</h2><span>Separate from what counts toward net worth</span></header>
+<details class="ledger-section ledger-fold" id="accounts" open>
+  <summary class="ledger-section-title"><h2 id="accounts-title">Accounts in the budget</h2><span>Separate from what counts toward net worth</span></summary>
   <p class="finance-help">Include every account household spending runs through. Coverage shows the dates you’ve imported or recorded; months with gaps are marked incomplete.</p>
   <div class="finance-table-wrap"><table class="ledger-table"><thead><tr><th scope="col">Account</th><th scope="col">In budget · role</th><th scope="col">Coverage</th></tr></thead><tbody>
   {% for a in accounts %}<tr><th scope="row">{{ a.name }}<br><small>{{ a.currency }} · {{ 'Manual' if a.source == 'manual' else 'Connected' }}</small></th>
@@ -14,51 +14,51 @@
       <button class="btn" type="submit">{{ 'Save' if a.configured else 'Set up' }}</button></form></td>
     <td>{% set c = coverage.get(a.id) %}{% if c %}{{ c.first }} to {{ c.last }}{% if c.spans > 1 %} <small>({{ c.spans }} periods, may have gaps)</small>{% endif %}{% else %}<span class="ledger-unset">None yet</span>{% endif %}</td></tr>
   {% endfor %}</tbody></table></div>
-</section>
+</details>
 
-<section class="ledger-section" id="coverage" aria-labelledby="coverage-title">
-  <header class="ledger-section-title"><h2 id="coverage-title">Record coverage without importing</h2><span>For accounts you enter by hand</span></header>
+<details class="ledger-section ledger-fold" id="coverage" open>
+  <summary class="ledger-section-title"><h2 id="coverage-title">Record coverage without importing</h2><span>For accounts you enter by hand</span></summary>
   <p class="finance-help">Say that every transaction for these dates has been entered, for example an HSA with two purchases a year. Imports record coverage automatically.</p>
   <form method="post" action="{{ url_for('finance_budget_settings_save', section='coverage') }}" class="ledger-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Account<select name="account_id">{% for a in accounts if a.configured %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select></label>
     <label>From<input type="date" name="start" required max="{{ today }}"></label>
     <label>Through<input type="date" name="end" required max="{{ today }}"></label>
     <button class="btn" type="submit">Record coverage</button></form>
-</section>
+</details>
 
-<section class="ledger-section" id="limits" aria-labelledby="limits-title">
-  <header class="ledger-section-title"><h2 id="limits-title">Cash limits</h2><span>Used by the forecast and fund checks</span></header>
+<details class="ledger-section ledger-fold" id="limits" open>
+  <summary class="ledger-section-title"><h2 id="limits-title">Cash limits</h2><span>Used by the forecast and fund checks</span></summary>
   <p class="finance-help">The checking minimum is the balance you never want to go below; the forecast warns before it happens. Reserve holds are reserve cash already promised elsewhere, so funds can’t count on it. Leave blank for none.</p>
   <form method="post" action="{{ url_for('finance_budget_settings_save', section='limits') }}" class="ledger-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Checking minimum<input name="checking_minimum" inputmode="decimal" value="{{ limits.checking_minimum if limits.checking_minimum is not none }}" placeholder="0.00"></label>
     <label>Reserve holds<input name="reserve_holds" inputmode="decimal" value="{{ limits.reserve_holds if limits.reserve_holds is not none }}" placeholder="0.00"></label>
     <button class="btn" type="submit">Save limits</button></form>
-</section>
+</details>
 
-<section class="ledger-section" id="people" aria-labelledby="people-title">
-  <header class="ledger-section-title"><h2 id="people-title">Household members</h2><span>Who a purchase can be for, besides “shared”</span></header>
+<details class="ledger-section ledger-fold" id="people" open>
+  <summary class="ledger-section-title"><h2 id="people-title">Household members</h2><span>Who a purchase can be for, besides “shared”</span></summary>
   <form method="post" action="{{ url_for('finance_budget_settings_save', section='people') }}" class="ledger-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Names, separated by commas<input name="people" value="{{ people|join(', ') }}" maxlength="400" required></label>
     <button class="btn" type="submit">Save members</button></form>
-</section>
+</details>
 
-<section class="ledger-section" id="targets" aria-labelledby="targets-title">
-  <header class="ledger-section-title"><h2 id="targets-title">Categories and targets</h2><span>Targets shown are for {{ month }}</span></header>
+<details class="ledger-section ledger-fold" id="targets" open>
+  <summary class="ledger-section-title"><h2 id="targets-title">Categories and targets</h2><span>Targets shown are for {{ month }}</span></summary>
   <p class="finance-help">A new target applies from the month you choose onward. Mark it <em>historical</em> only when it comes from your own transaction history; planning values and estimates keep the plan labeled provisional.</p>
   <div class="finance-table-wrap"><table class="ledger-table"><thead><tr><th scope="col">Category</th><th scope="col">Type</th><th scope="col" class="number">Target</th><th scope="col">Set a target</th></tr></thead><tbody>
   {% for c in categories %}<tr class="{{ 'budget-child' if c.parent_id }}{{ ' budget-inactive' if not c.active }}"><th scope="row">{% if c.parent_id %}<span aria-hidden="true">↳ </span>{% endif %}<a href="#category-{{ c.id }}">{{ c.name }}</a>{% if not c.active %} <small>(inactive)</small>{% endif %}</th>
     <td>{{ types[c.type] }}</td>
-    <td class="number">{% if c.target %}{{ c.target.amount|finance_amount }}<small class="budget-basis budget-basis--{{ c.target.basis }}">{{ c.target.basis }}</small>{% if c.target.note %}<br><small>{{ c.target.note }}</small>{% endif %}{% else %}<span class="ledger-unset">—</span>{% endif %}</td>
+    <td class="number budget-target-cell">{% if c.target %}{{ c.target.amount|finance_amount }}<small class="budget-basis budget-basis--{{ c.target.basis }}">{{ c.target.basis }}</small>{% if c.target.note %}<br><small>{{ c.target.note }}</small>{% endif %}{% else %}<span class="ledger-unset">—</span>{% endif %}</td>
     <td>{% if c.type != 'transfer' %}<form method="post" action="{{ url_for('finance_budget_settings_save', section='target') }}" class="budget-inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="category_id" value="{{ c.id }}">
       <label><span class="sr-only">From month</span><input type="month" name="effective_month" value="{{ month }}" min="{{ month }}" required></label>
       <label><span class="sr-only">Monthly amount for {{ c.name }}</span><input name="amount" inputmode="decimal" required size="8" placeholder="0.00"></label>
       <label><span class="sr-only">Basis</span><select name="basis"><option value="planning">planning</option><option value="estimate">estimate</option><option value="historical">historical</option></select></label>
       <input type="hidden" name="note" value=""><button class="btn" type="submit">Set</button></form>{% endif %}</td></tr>
   {% endfor %}</tbody></table></div>
-</section>
+</details>
 
-<section class="ledger-section" id="category" aria-labelledby="category-title">
-  <header class="ledger-section-title"><h2 id="category-title">Edit categories</h2><span>Write down what counts, so the same question isn’t argued twice</span></header>
+<details class="ledger-section ledger-fold" id="category" open>
+  <summary class="ledger-section-title"><h2 id="category-title">Edit categories</h2><span>Write down what counts, so the same question isn’t argued twice</span></summary>
   <div class="ledger-tools">
   {% macro category_form(c=none) %}
     <form method="post" action="{{ url_for('finance_budget_settings_save', section='category') }}" class="ledger-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% if c %}<input type="hidden" name="category_id" value="{{ c.id }}">{% endif %}
@@ -78,5 +78,5 @@
   <details><summary>Add a category</summary>{{ category_form() }}</details>
   {% for c in categories %}<details id="category-{{ c.id }}"><summary>{{ c.name }}</summary>{{ category_form(c) }}</details>{% endfor %}
   </div>
-</section>
+</details>
 {% endblock %}

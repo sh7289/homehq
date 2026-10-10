@@ -15,6 +15,8 @@ ZERO = Decimal('0.00')
 SPENDING_KINDS = ('expense', 'refund', 'reimbursement')
 PLAN_OUTFLOW_TYPES = ('operating', 'capped', 'sinking', 'savings')
 BASIS_STRENGTH = {'planning': 0, 'estimate': 1, 'historical': 2}
+# Allocation lines in the built-in excluded category are kept on record but never counted.
+COUNTED = 'a.category_id NOT IN (SELECT id FROM finance_budget_categories WHERE excluded=1)'
 
 
 def _month_bounds(month):
@@ -55,7 +57,8 @@ def month_summary(conn, month, today):
 
 def _summary(conn, month, today):
     start, end = _month_bounds(month)
-    window_end = min(end, today)
+    # Today is still posting, so a month is complete once covered through yesterday.
+    window_end = min(end, today - timedelta(days=1))
     currency = finance_budget.primary_currency(conn)
     names = _display(conn)
     reasons = []
@@ -86,12 +89,13 @@ def _summary(conn, month, today):
         allocations.setdefault(line['txn_id'], []).append(line)
 
     direct = category_spending(conn, month)
+    excluded = {r[0] for r in conn.execute('SELECT id FROM finance_budget_categories WHERE excluded=1')}
     roles = {r['account_id']: r['role'] for r in conn.execute('SELECT account_id, role FROM finance_budget_accounts')}
     funding = {'hsa': ZERO, 'everyday': ZERO}
     for line in conn.execute(
             "SELECT t.account_id, a.amount FROM finance_txn_allocations a JOIN finance_txns t ON t.id=a.txn_id "
             "WHERE t.txn_date BETWEEN ? AND ? AND t.status IN ('posted','pending') AND t.kind IN ('expense','refund','reimbursement') "
-            "AND t.currency=?", (start.isoformat(), end.isoformat(), currency)):
+            f"AND t.currency=? AND {COUNTED}", (start.isoformat(), end.isoformat(), currency)):
         funding['hsa' if roles.get(line['account_id']) == 'hsa' else 'everyday'] -= Decimal(line['amount'])
     known = {'posted': sum((d['posted'] for d in direct.values()), ZERO),
              'pending': sum((d['pending'] for d in direct.values()), ZERO)}
@@ -128,7 +132,7 @@ def _summary(conn, month, today):
                 inflows['amount'] += amount
             continue
         if txn['kind'] == 'income':
-            income += sum((Decimal(line['amount']) for line in lines), ZERO)
+            income += sum((Decimal(line['amount']) for line in lines if line['category_id'] not in excluded), ZERO)
 
     if not insufficient:
         if uncategorized['count']:
@@ -152,6 +156,8 @@ def _summary(conn, month, today):
     targets = {c['id']: finance_budget.target_for(conn, c['id'], month) for c in all_categories}
 
     for category in all_categories:
+        if category['excluded']:
+            continue
         spent_slot = direct.get(category['id'], {'posted': ZERO, 'pending': ZERO})
         if not category['active'] and spent_slot == {'posted': ZERO, 'pending': ZERO}:
             continue
@@ -207,7 +213,7 @@ def category_spending(conn, month):
     for line in conn.execute(
             "SELECT a.category_id, a.amount, t.status FROM finance_txn_allocations a JOIN finance_txns t ON t.id=a.txn_id "
             "WHERE t.txn_date BETWEEN ? AND ? AND t.status IN ('posted','pending') AND t.kind IN ('expense','refund','reimbursement') "
-            "AND t.currency=?", (start.isoformat(), end.isoformat(), finance_budget.primary_currency(conn))):
+            f"AND t.currency=? AND {COUNTED}", (start.isoformat(), end.isoformat(), finance_budget.primary_currency(conn))):
         slot = result.setdefault(line['category_id'], {'posted': ZERO, 'pending': ZERO})
         slot[line['status']] -= Decimal(line['amount'])
     return result

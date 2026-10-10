@@ -138,21 +138,29 @@ def register(app):
 
     # ---- Transactions -----------------------------------------------------
 
-    def inbox(error=None, status=200):
-        view = 'all' if request.args.get('view') == 'all' else 'review'
-        month = request.args.get('month') or None
+    def filters():
+        values = request.values
+        view = 'all' if values.get('view') == 'all' else 'review'
+        month = values.get('month') or None
         if month:
             month = _month_or_400(month)
-        category = request.args.get('category') or None
+        category = values.get('category') or None
         if category and not category.isdigit():
             abort(400)
+        return dict(view=view, month=month or '', account=values.get('account', ''), category=category or '')
+
+    def inbox(error=None, status=200, row_errors=None):
+        f = filters()
         with budget_db() as conn:
-            rows = finance_ledger.transactions(conn, view=view, month=month, account_id=request.args.get('account') or None,
-                                               category_id=int(category) if category else None)
-            return render_template('finance_transactions.html', active='finance', tab='transactions', rows=rows, view=view,
-                                   month=month or '', account=request.args.get('account', ''), category=category or '',
-                                   accounts=accounts(conn), categories=finance_budget.categories(conn), error=error,
-                                   accepted=request.args.get('accepted')), status
+            rows = finance_ledger.transactions(conn, view=f['view'], month=f['month'] or None, account_id=f['account'] or None,
+                                               category_id=int(f['category']) if f['category'] else None)
+            categories = finance_budget.categories(conn)
+            return render_template('finance_transactions.html', active='finance', tab='transactions', rows=rows, **f,
+                                   accounts=accounts(conn), categories=categories, error=error,
+                                   pickable=[c for c in categories if c['active'] and c['type'] != 'transfer'],
+                                   people=['shared'] + finance_budget.people(conn), row_errors=row_errors or {},
+                                   accepted=request.args.get('accepted'), saved=request.args.get('saved'),
+                                   caught_up=request.args.get('caught_up')), status
 
     @route('/finance/transactions', 'finance_transactions')
     def transactions_page():
@@ -167,6 +175,25 @@ def register(app):
         except FinanceStoreError as error:
             return inbox(str(error), 400)
         return redirect(url_for('finance_transactions', accepted=count))
+
+    @route('/finance/transactions/categorize', 'finance_categorize', methods=('POST',))
+    def categorize():
+        form, saved, problems = request.form, 0, {}
+        with budget_db(write=True) as conn:
+            for txn_id in form.getlist('txn_id')[:200]:
+                category = form.get(f'category_{txn_id}', '')
+                if not category:
+                    continue
+                try:
+                    finance_ledger.quick_classify(conn, txn_id, category_id=category,
+                                                  person=form.get(f'person_{txn_id}', ''), actor=actor())
+                    saved += 1
+                except FinanceStoreError as problem:
+                    problems[txn_id] = str(problem)
+        if problems:
+            done = f"Saved {saved} categor{'y' if saved == 1 else 'ies'}. " if saved else ''
+            return inbox(done + f"{len(problems)} row{'' if len(problems) == 1 else 's'} could not be saved; see below.", 400, problems)
+        return redirect(url_for('finance_transactions', saved=saved, **{k: v for k, v in filters().items() if v}))
 
     def new_form(error=None, status=200):
         with budget_db() as conn:
@@ -222,13 +249,24 @@ def register(app):
                                    categories=[c for c in finance_budget.categories(conn, active_only=True) if c['type'] != 'transfer'],
                                    people=['shared'] + finance_budget.people(conn), candidates=candidates, payments=payments,
                                    error=error, next=_safe_next(request.values.get('next'), ''),
+                                   reviewed=request.args.get('reviewed'), remaining=len(review_queue(conn)),
                                    kinds=KINDS, links=LINKS), status
 
     @route('/finance/transactions/<int:txn_id>', 'finance_txn')
     def txn_detail(txn_id):
         return detail(txn_id)
 
-    def after_edit(txn_id):
+    def review_queue(conn):
+        return [row['id'] for row in finance_ledger.transactions(conn, view='review', limit=1000)]
+
+    def after_edit(txn_id, before=None, after=None):
+        """Once a transaction leaves the review list, go to the next one still on it."""
+        if before is not None and txn_id in before and txn_id not in after:
+            later = before[before.index(txn_id) + 1:]
+            following = [i for i in later if i in after] + after
+            if following:
+                return redirect(url_for('finance_txn', txn_id=following[0], reviewed=1))
+            return redirect(url_for('finance_transactions', caught_up=1))
         return redirect(_safe_next(request.form.get('next'), url_for('finance_txn', txn_id=txn_id)))
 
     @route('/finance/transactions/<int:txn_id>/classify', 'finance_txn_classify', methods=('POST',))
@@ -237,6 +275,7 @@ def register(app):
         try:
             with budget_db(write=True) as conn:
                 txn = finance_ledger.get_txn(conn, txn_id)
+                before = review_queue(conn)
                 kind = form.get('kind', '')
                 allocations = []
                 if kind not in finance_ledger.MOVEMENT_KINDS:
@@ -251,11 +290,12 @@ def register(app):
                                         merchant=form.get('merchant'), note=form.get('note'))
                 if form.get('keep_both'):
                     finance_ledger.keep_both(conn, txn['id'], actor())
+                after = review_queue(conn)
         except FinanceStoreError as error:
             if str(error) == 'Transaction was not found.':
                 abort(404)
             return detail(txn_id, str(error), 400)
-        return after_edit(txn_id)
+        return after_edit(txn_id, before, after)
 
     @route('/finance/transactions/<int:txn_id>/link', 'finance_txn_link', methods=('POST',))
     def txn_link(txn_id):
@@ -263,14 +303,16 @@ def register(app):
         try:
             with budget_db(write=True) as conn:
                 txn = finance_ledger.get_txn(conn, txn_id)
+                before = review_queue(conn)
                 first, second = txn['id'], other
                 if kind == 'pending_posted' and txn['status'] != 'pending':
                     first, second = other, txn['id']
                 finance_ledger.link(conn, kind=kind, from_id=first, to_id=second, actor=actor(),
                                     payment_id=request.form.get('payment_id') or None)
+                after = review_queue(conn)
         except FinanceStoreError as error:
             return detail(txn_id, str(error), 400)
-        return after_edit(txn_id)
+        return after_edit(txn_id, before, after)
 
     @route('/finance/transactions/<int:txn_id>/match', 'finance_txn_match', methods=('POST',))
     def txn_match(txn_id):
