@@ -64,6 +64,7 @@
       {% if kind == 'card_payment' and payments %}<label class="sr-only" for="pay-{{ c.id }}">Matching payment plan</label><select id="pay-{{ c.id }}" name="payment_id"><option value="">No payment plan</option>{% for p in payments %}<option value="{{ p.id }}">Plan {{ p.payment_date }} · {{ p.amount }}</option>{% endfor %}</select>{% endif %}
       <button class="btn" type="submit">Link</button></form></li>{% endfor %}</ul>
   {% endfor %}
+  {% if txn.amount > 0 and 'refund' in candidates and not candidates['refund'] %}<p class="finance-help">Friend or family paying you back? Choose <strong>Reimbursement</strong> above with the same category as the original purchase — no link needed. “Refund of” is for a store refunding a purchase.</p>{% endif %}
   {% if not txn.links and not (candidates.values()|select|list) %}<p class="ledger-empty-group">No likely matches found nearby. {% if kind in ('transfer', 'card_payment') %}If the other side isn’t imported yet, this stays flagged as unmatched.{% endif %}</p>{% endif %}
 </section>
 

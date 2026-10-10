@@ -344,7 +344,18 @@
 .budget-filters input, .budget-filters select, .budget-inline input, .budget-inline select, .budget-lines select, .budget-lines input, .budget-note textarea, .ledger-form textarea { box-sizing: border-box; min-height: 40px; border: 1px solid #bcb3a5; border-radius: 4px; padding: .45rem; background: #fffdf7; color: #3b342c; font: inherit; }
 .budget-bulk { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; padding: .8rem 1rem; background: #f3ead7; border-radius: 6px; margin-bottom: 1rem; font-size: .85rem; }
 .budget-bulk p { margin: 0; }
-.budget-inbox td:first-child { width: 2rem; }
+.budget-pick { display: flex; flex-wrap: wrap; gap: .4rem; }
+.budget-pick select { box-sizing: border-box; min-height: 40px; max-width: 100%; border: 1px solid #bcb3a5; border-radius: 4px; padding: .4rem; background: #fffdf7; color: #3b342c; font: inherit; }
+.budget-pick label:first-child { flex: 1 1 13rem; }
+.budget-pick label:first-child select { width: 100%; }
+.budget-pick label:last-child select { width: 9.5rem; }
+.budget-inbox .budget-meta { display: block; margin-top: .25rem; color: #706555; font-size: .75rem; font-weight: 400; }
+.budget-inbox tbody th { white-space: normal; }
+.budget-row-error { margin: .35rem 0 0; color: #8a3b2e; font-size: .78rem; white-space: normal; }
+.budget-row--error td, .budget-row--error th { background: #fbefe9; }
+.budget-savebar { position: sticky; bottom: 0; z-index: 2; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; padding: .8rem 1rem; margin-top: .8rem; background: #f3ead7; border-top: 1px solid #d8d0c4; border-radius: 6px; font-size: .85rem; }
+.budget-savebar p { margin: 0; color: #5a5046; }
+.finance .btn--small { min-height: 0; padding: .3rem .7rem; font-size: .75rem; }
 .budget-inbox .budget-pill { margin-left: .35rem; }
 .budget-row--pending td, .budget-row--pending th { background: #fbf7ee; }
 .budget-classify { display: grid; gap: 1rem; padding: 1rem 0; }
@@ -429,3 +440,8 @@
 .finance .budget-subhead { font: 500 1.1rem/1.3 Georgia, serif; margin: 1.5rem 0 .2rem; }
 .budget-bonus-form { margin-bottom: 1rem; }
 .budget-savings-line { margin-top: -.2rem; }
+@media (min-width: 1000px) {
+  .budget-pick { flex-wrap: nowrap; }
+  .budget-pick label:first-child { flex: 0 0 15rem; }
+  .budget-pick label:last-child select { width: 8.5rem; }
+}
