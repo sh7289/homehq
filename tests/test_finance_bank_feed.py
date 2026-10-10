@@ -146,3 +146,13 @@ def test_synced_month_is_not_flagged_as_missing_data(tmp_path):
              complete=True, today=TODAY)
     summary = finance_ledger_math.month_summary(conn, '2026-10', TODAY)
     assert [c['missing'] for c in summary['coverage']] == [[], [], []]
+
+
+def test_month_stays_covered_after_midnight_until_the_next_sync(tmp_path):
+    import finance_ledger_math
+    conn = ledger_db(tmp_path)
+    F.record(conn, {a: {'complete': True, 'transactions': []} for a in (CHECKING, CARD_S, CARD_H)},
+             complete=True, today=TODAY)
+    later = date(2026, 10, 10)  # the UTC date has rolled over; the 6am sync hasn't run yet
+    summary = finance_ledger_math.month_summary(conn, '2026-10', later)
+    assert [c['missing'] for c in summary['coverage']] == [[], [], []]

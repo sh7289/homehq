@@ -57,7 +57,8 @@ def month_summary(conn, month, today):
 
 def _summary(conn, month, today):
     start, end = _month_bounds(month)
-    window_end = min(end, today)
+    # Today is still posting, so a month is complete once covered through yesterday.
+    window_end = min(end, today - timedelta(days=1))
     currency = finance_budget.primary_currency(conn)
     names = _display(conn)
     reasons = []
