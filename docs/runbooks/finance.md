@@ -334,8 +334,8 @@ about manual accounts and must not run against a worksheet database.
 
 Budgeting adds household *activity* (transactions) and *intentions* (categories and
 monthly targets) to the same private finance DB. It is still read-only toward banks:
-transactions come from CSV exports you download from each bank or card website, or
-from entries added by hand. SimpleFIN is still balance-only.
+transactions come from the daily bank sync (see below), CSV exports you download
+from each bank or card website, or entries added by hand.
 
 **Upgrade.** Deploy the code, then follow the same stop → back up → migrate → start
 sequence as the worksheet upgrade above (`scripts/migrate_finance.py`). Take a verified
@@ -372,6 +372,37 @@ own computer are bank statements, so delete them after importing.
 Re-importing the same or an overlapping export only adds rows that are new, and it
 never overwrites review work. **Undo this import** on an import page removes its
 transactions. It asks for confirmation if any of them were already reviewed.
+
+### Bank-sync transactions
+
+The daily sync also brings in **posted** transactions (never pending ones) for every
+connected account that is *Included* in Budget settings. Accounts that are not included
+stay balance-only and none of their transactions are stored. Rows land in the
+Transactions inbox as unreviewed, with digit runs masked and the bank's transaction
+id kept only as a hash; memos are dropped.
+
+- **Window.** The first sync asks from the budget start (Oct 1, 2026). Later syncs
+  re-ask the last 7 days already covered so late-posting purchases are caught;
+  anything already stored is skipped. Requests never reach back more than 60 days.
+- **Coverage.** Each sync records coverage through yesterday for each account,
+  unless SimpleFIN reported a warning or returned a malformed row for that account.
+- **Undo.** A sync that finds new rows for an account shows up on **Imports** as
+  "Bank sync"; **Undo this import** removes those rows and their coverage. The next
+  sync will bring them back if they are still in its window.
+- **Duplicates.** A synced purchase that matches a hand-entered or CSV row (same
+  account and amount within a few days) is flagged *possible duplicate*. Once an
+  account syncs, stop entering it by hand or importing its CSV.
+- **Failure.** Balances are saved first. If storing transactions fails, the sync exits
+  non-zero with "transactions could not be recorded" and the balances still stand.
+
+**Upgrade.** Before deploying, tick *Included* (and set a role) for each spending account
+in Budget settings; the current server already has that page. Then deploy and follow the
+stop → back up → migrate → start sequence above. The migration rebuilds
+`finance_source_records` once so it accepts bank-sync rows, copying existing rows
+unchanged, and the `systemctl start homehq-finance-sync.service` step in that sequence
+is the first transaction sync: check its journal output, then open **Transactions**.
+An account included after the upgrade is picked up by the next 6am sync, or run that
+same `systemctl start` command to pull it right away.
 
 ### Budgeting Phase 2: funds, forecast and exports
 

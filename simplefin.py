@@ -1,4 +1,4 @@
-"""Privacy-preserving SimpleFIN balance client.
+"""Privacy-preserving SimpleFIN balance and transaction client.
 
 ``fetch_balances`` returns this normalized contract::
 
@@ -14,8 +14,9 @@
         "complete": bool,
     }
 
-Only sanitized provider display names cross the boundary; transaction data,
-extras, response errors, and raw identifiers never do.
+Only sanitized provider display names cross the boundary; extras, response
+errors, and raw identifiers never do. ``fetch_accounts`` additionally returns
+posted transactions with hashed ids and masked descriptions (see its docstring).
 """
 
 import base64
@@ -345,8 +346,7 @@ def _normalize(data):
     return {"accounts": accounts, "warnings": warnings, "complete": not warnings}
 
 
-def fetch_balances(access_url, session=None):
-    """Fetch and normalize a balance-only account set."""
+def _fetch_accounts_json(access_url, params, session):
     parts = _parse_url(access_url, credentials=True)
     username = unquote(parts.username)
     password = unquote(parts.password)
@@ -357,13 +357,101 @@ def fetch_balances(access_url, session=None):
         root + "/accounts",
         session=session,
         auth=(username, password),
-        params={"version": "2", "balances-only": "1"},
+        params=params,
         allow_redirects=False,
         timeout=(5, 30),
         stream=True,
         verify=True,
     )
-    return _normalize(_decode_json(body))
+    return _decode_json(body)
+
+
+def fetch_balances(access_url, session=None):
+    """Fetch and normalize a balance-only account set."""
+    return _normalize(_fetch_accounts_json(access_url, {"version": "2", "balances-only": "1"}, session))
+
+
+def transaction_hash(account_id, provider_txn_id):
+    """Opaque per-account identity for one provider transaction."""
+    return hashlib.sha256("sfin-txn\0{}\0{}".format(account_id, provider_txn_id).encode("utf-8")).hexdigest()
+
+
+def _mask_description(value):
+    value = " ".join("".join(c if ord(c) >= 32 and ord(c) != 127 else " " for c in value).split())
+    return re.sub(r"\d(?:[ -]?\d){3,}", "••••", value)[:200]
+
+
+def _txn_day(value):
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= 32503680000:
+        raise ValueError
+    return datetime.fromtimestamp(value, timezone.utc).date().isoformat()
+
+
+def _transaction(account_id, item):
+    """One posted transaction as masked, hashed fields, or None when still pending."""
+    if not isinstance(item, dict):
+        raise ValueError
+    if item.get("pending") is True or item.get("posted") == 0:
+        return None
+    provider_id = item.get("id")
+    if not isinstance(provider_id, str) or not provider_id or len(provider_id) > 200:
+        raise ValueError
+    posted = _txn_day(item.get("posted"))
+    transacted = item.get("transacted_at")
+    amount = item.get("amount")
+    if not isinstance(amount, str) or len(amount) > 40:
+        raise ValueError
+    try:
+        number = Decimal(amount)
+    except InvalidOperation:
+        raise ValueError from None
+    if not number.is_finite() or number.copy_abs() >= Decimal("1e12") or number != number.quantize(Decimal("0.01")):
+        raise ValueError
+    texts = [item.get(key) for key in ("description", "payee")]
+    if not any(isinstance(text, str) and text.strip() for text in texts):
+        raise ValueError
+    description = next(_mask_description(text) for text in texts if isinstance(text, str) and text.strip())
+    return {
+        "id_hash": transaction_hash(account_id, provider_id),
+        "txn_date": _txn_day(transacted) if transacted else posted,
+        "posted_date": posted,
+        "amount": number.quantize(Decimal("0.01")),
+        "description": description,
+    }
+
+
+def _transactions(data, accounts):
+    """Posted transactions keyed by hashed account id; one bad row marks its account incomplete."""
+    feed = {}
+    for item, normalized in zip(data["accounts"], accounts):
+        rows, complete = [], isinstance(item.get("transactions"), list)
+        for raw in item.get("transactions") if complete else []:
+            try:
+                row = _transaction(normalized["id"], raw)
+            except ValueError:
+                complete = False
+                continue
+            if row is not None:
+                rows.append(row)
+        feed[normalized["id"]] = {"complete": complete, "transactions": rows}
+    return feed
+
+
+def fetch_accounts(access_url, start_date, session=None):
+    """Fetch balances plus posted transactions since ``start_date`` (YYYY-MM-DD, UTC).
+
+    Returns ``(payload, feed)``: ``payload`` is exactly the ``fetch_balances``
+    contract, and ``feed`` maps each hashed account id to
+    ``{"complete": bool, "transactions": [...]}``. Transaction ids are hashed,
+    descriptions are masked, and memos and pending rows are dropped.
+    """
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        raise _error("config") from None
+    data = _fetch_accounts_json(access_url, {"version": "2", "start-date": str(int(start.timestamp()))}, session)
+    payload = _normalize(data)
+    return payload, _transactions(data, payload["accounts"])
 
 
 def claim_token(token, session=None):

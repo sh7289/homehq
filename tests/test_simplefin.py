@@ -425,3 +425,88 @@ def test_display_names_strip_controls_and_mask_spaced_account_numbers():
     assert simplefin._display_name("Bank\n account 1234-5678 9012") == "Bank account ••••"
     assert len(simplefin._display_name("A" * 1000)) == 80
     assert simplefin._display_name(None) == ""
+
+
+def txn(txn_id="t-1", **overrides):
+    value = {
+        "id": txn_id,
+        "posted": 1_791_158_400,  # 2026-10-05
+        "amount": "-42.10",
+        "description": "TRADER JOES 5551234567 PORTLAND",
+        "payee": "Trader Joe's",
+        "memo": "card 4111111111111111",
+    }
+    value.update(overrides)
+    return value
+
+
+def test_fetch_accounts_requests_posted_transactions_from_start_date():
+    response = FakeResponse(payload=payload([account(transactions=[txn()])]))
+    session = FakeSession(response)
+
+    result, feed = simplefin.fetch_accounts(
+        "https://alice:s3cr%40t@beta-bridge.simplefin.org/simplefin", "2026-10-01", session=session
+    )
+
+    method, url, kwargs = session.calls[0]
+    assert url == "https://beta-bridge.simplefin.org/simplefin/accounts"
+    assert kwargs["params"] == {"version": "2", "start-date": "1790812800"}
+    assert "balances-only" not in kwargs["params"] and "pending" not in kwargs["params"]
+    assert result["accounts"][0]["balance"] == Decimal("100.10")
+    assert set(result) == {"accounts", "warnings", "complete"}
+    account_id = result["accounts"][0]["id"]
+    assert feed == {account_id: {"complete": True, "transactions": [{
+        "id_hash": simplefin.transaction_hash(account_id, "t-1"),
+        "txn_date": "2026-10-05",
+        "posted_date": "2026-10-05",
+        "amount": Decimal("-42.10"),
+        "description": "TRADER JOES •••• PORTLAND",
+    }]}}
+    assert "t-1" not in json.dumps(feed, default=str)
+    assert "4111" not in json.dumps(feed, default=str)
+    assert response.closed
+
+
+def test_fetch_accounts_uses_transacted_date_and_skips_pending():
+    rows = [
+        txn("a", transacted_at=1_791_000_000),  # 2026-10-03
+        txn("b", pending=True),
+        txn("c", posted=0),
+        txn("d", description="", payee="Corner Cafe"),
+    ]
+    result, feed = simplefin.fetch_accounts(
+        "https://u:p@bridge.simplefin.org/simplefin", "2026-10-01",
+        session=FakeSession(FakeResponse(payload=payload([account(transactions=rows)]))),
+    )
+    entry = feed[result["accounts"][0]["id"]]
+    assert entry["complete"] is True
+    assert [(t["txn_date"], t["posted_date"], t["description"]) for t in entry["transactions"]] == [
+        ("2026-10-03", "2026-10-05", "TRADER JOES •••• PORTLAND"),
+        ("2026-10-05", "2026-10-05", "Corner Cafe"),
+    ]
+
+
+@pytest.mark.parametrize("bad", [
+    {"amount": "NaN"}, {"amount": "1.234"}, {"amount": 5}, {"posted": "yesterday"},
+    {"id": ""}, {"description": 7, "payee": None},
+])
+def test_malformed_transaction_marks_account_incomplete_but_keeps_balances(bad):
+    rows = [txn("good"), txn("bad", **bad)]
+    result, feed = simplefin.fetch_accounts(
+        "https://u:p@bridge.simplefin.org/simplefin", "2026-10-01",
+        session=FakeSession(FakeResponse(payload=payload([account(transactions=rows)]))),
+    )
+    entry = feed[result["accounts"][0]["id"]]
+    assert result["accounts"][0]["balance"] == Decimal("100.10")
+    assert entry["complete"] is False
+    assert [t["amount"] for t in entry["transactions"]] == [Decimal("-42.10")]
+
+
+def test_account_without_transaction_list_is_incomplete():
+    item = account()
+    del item["transactions"]
+    result, feed = simplefin.fetch_accounts(
+        "https://u:p@bridge.simplefin.org/simplefin", "2026-10-01",
+        session=FakeSession(FakeResponse(payload=payload([item]))),
+    )
+    assert feed[result["accounts"][0]["id"]] == {"complete": False, "transactions": []}

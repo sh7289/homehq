@@ -64,7 +64,7 @@ def create_txn(conn, *, account_id, txn_date, amount, description, actor, status
     value = amount if isinstance(amount, Decimal) else parse_money(amount)
     if value == 0:
         raise FinanceStoreError('Enter a non-zero amount.')
-    if status not in ('pending', 'posted') or source not in ('csv', 'manual'):
+    if status not in ('pending', 'posted') or source not in ('csv', 'manual', 'sync'):
         raise FinanceStoreError('Transaction settings are invalid.')
     actor = _text(actor, True)
     description = mask_digits(description) or '(no description)'

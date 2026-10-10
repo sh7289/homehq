@@ -70,7 +70,7 @@
 <section class="ledger-section" aria-labelledby="evidence-title">
   <header class="ledger-section-title"><h2 id="evidence-title">Original record</h2><span>Kept unchanged for reference</span></header>
   <dl class="budget-evidence"><div><dt>Bank description</dt><dd>{{ txn.original_description }}</dd></div>
-    {% for r in txn.source_records %}<div><dt>Source</dt><dd>{{ 'CSV import' if r.source == 'csv' else 'Entered by hand' }}{% if r.batch_id %} · <a href="{{ url_for('finance_import', batch_id=r.batch_id) }}">import #{{ r.batch_id }}</a>{% endif %}{% if r.columns.posted_date %} · posted {{ r.columns.posted_date }}{% endif %}</dd></div>{% endfor %}
+    {% for r in txn.source_records %}<div><dt>Source</dt><dd>{{ {'csv': 'CSV import', 'sync': 'Bank sync'}.get(r.source, 'Entered by hand') }}{% if r.batch_id %} · <a href="{{ url_for('finance_import', batch_id=r.batch_id) }}">import #{{ r.batch_id }}</a>{% endif %}{% if r.columns.posted_date %} · posted {{ r.columns.posted_date }}{% endif %}</dd></div>{% endfor %}
     <div><dt>Added</dt><dd>{{ txn.created_at[:10] }} by {{ txn.created_by }}{% if txn.updated_by %} · last changed {{ txn.updated_at[:10] }} by {{ txn.updated_by }}{% endif %}</dd></div></dl>
   {% if txn.status not in ('void',) %}<form method="post" action="{{ url_for('finance_txn_void', txn_id=txn.id) }}" class="budget-void"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn" type="submit">Void this transaction</button><small>Use for duplicates. It stays here but isn’t counted.</small></form>{% endif %}
 </section>

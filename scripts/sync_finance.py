@@ -1,4 +1,4 @@
-"""Synchronize SimpleFIN balances into the private Home HQ finance store."""
+"""Synchronize SimpleFIN balances, and posted transactions for budget accounts, into the private finance store."""
 
 import argparse
 import fcntl
@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import finance_bank_feed
 import finance_store
 import simplefin
 
@@ -60,7 +61,7 @@ def _lock(path):
     return handle
 
 
-def main(argv=None, *, environ=None, fetch=None, stdout=None, stderr=None):
+def main(argv=None, *, environ=None, fetch=None, fetch_feed=None, today=None, stdout=None, stderr=None):
     parser = argparse.ArgumentParser(description="Synchronize private finance balances.")
     parser.add_argument("--demo", action="store_true", help="Load deterministic demo balances")
     args = parser.parse_args(argv)
@@ -75,6 +76,7 @@ def main(argv=None, *, environ=None, fetch=None, stdout=None, stderr=None):
 
     connection = None
     lock = None
+    feed = None
     try:
         connection = finance_store.connect(db_path, repo_dir=str(ROOT))
         try:
@@ -97,8 +99,20 @@ def main(argv=None, *, environ=None, fetch=None, stdout=None, stderr=None):
             finance_store.set_store_mode(connection, "demo")
         else:
             finance_store.set_store_mode(connection, "live")
-            payload = (fetch or simplefin.fetch_balances)(credential)
+            today = today or datetime.now(timezone.utc).date()
+            start = finance_bank_feed.start_date(connection, today)
+            if start is None:
+                payload = (fetch or simplefin.fetch_balances)(credential)
+            else:
+                payload, feed = (fetch_feed or simplefin.fetch_accounts)(credential, start)
         finance_store.record_sync(connection, payload, now=DEMO_NOW if args.demo else None)
+        if feed is not None:
+            # Balances are already saved; a transaction problem must not undo them.
+            try:
+                finance_bank_feed.record(connection, feed, complete=payload["complete"], today=today)
+            except (finance_store.FinanceStoreError, sqlite3.Error):
+                _message("Finance balances synced; transactions could not be recorded.", stderr)
+                return 1
     except (finance_store.FinanceStoreError, OSError, sqlite3.Error):
         _message("Finance sync configuration is invalid.", stderr)
         return 2
