@@ -258,3 +258,18 @@ def test_large_fractional_balances_keep_exact_total(tmp_path):
     finance_store.record_sync(conn, {'accounts': accounts, 'warnings': [], 'complete': True})
     assert finance_store.dashboard(conn)['totals']['by_currency']['USD'] == Decimal('999999999999999999999.123456789123456790')
     conn.close()
+
+
+@pytest.mark.parametrize("name, accepted", [
+    ("Gold Card (••1003)", True), ("Checking ••4321", True),
+    ("Gold Card 41003", False), ("Card ••12345", False), ("Card 1234", False),
+])
+def test_provider_names_may_carry_only_a_masked_last_four(tmp_path, name, accepted):
+    conn = open_store(tmp_path)
+    account = dict(normalized()["accounts"][0], provider_name=name)
+    if accepted:
+        finance_store.record_sync(conn, normalized([account]))
+        assert conn.execute("SELECT provider_name FROM finance_accounts").fetchone()[0] == name
+    else:
+        with pytest.raises(finance_store.FinanceStoreError):
+            finance_store.record_sync(conn, normalized([account]))

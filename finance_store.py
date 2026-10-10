@@ -192,7 +192,7 @@ def _validate_account(account):
         raise FinanceStoreError("Finance payload is invalid.")
     for key in ("provider_name", "institution"):
         value = account.get(key, "")
-        if not isinstance(value, str) or len(value) > 80 or any(ord(c) < 32 or ord(c) == 127 for c in value) or re.search(r"\d{4,}", value):
+        if not isinstance(value, str) or len(value) > 80 or any(ord(c) < 32 or ord(c) == 127 for c in value) or re.search(r"\d{4,}", re.sub(r"••\d{4}(?!\d)", "", value)):
             raise FinanceStoreError("Finance payload is invalid.")
     currency = account["currency"]
     if currency != "NONFINANCIAL" and not re.fullmatch(r"[A-Z]{3}", currency or ""):

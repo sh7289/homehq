@@ -164,7 +164,7 @@ def test_normalization_scopes_ids_to_v2_connection_and_discards_provider_text():
     assert first["id"] != second["id"]
     assert len(first["id"]) == 64
     assert set(first) == {"id", "label", "provider_name", "institution", "currency", "balance", "balance_at"}
-    assert first["provider_name"] == "Provider Checking ••••"
+    assert first["provider_name"] == "Provider Checking ••4321"
     assert first["institution"] == "Provider login name"
     assert "4321" not in first["label"]
     assert "transactions" not in repr(result)
@@ -422,7 +422,9 @@ def test_transport_encoding_error_cannot_expose_credentials():
 
 
 def test_display_names_strip_controls_and_mask_spaced_account_numbers():
-    assert simplefin._display_name("Bank\n account 1234-5678 9012") == "Bank account ••••"
+    assert simplefin._display_name("Bank\n account 1234-5678 9012") == "Bank account ••9012"
+    assert simplefin._display_name("Gold Card (-41003)") == "Gold Card (-••1003)"
+    assert simplefin._display_name("Card 123") == "Card 123"
     assert len(simplefin._display_name("A" * 1000)) == 80
     assert simplefin._display_name(None) == ""
 

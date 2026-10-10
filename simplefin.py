@@ -305,11 +305,11 @@ def _warnings(data):
 
 
 def _display_name(value):
-    """Keep a short hint, masking account-number-like digit sequences."""
+    """Keep a short hint, masking account-number-like digit runs down to their last four."""
     if not isinstance(value, str):
         return ""
     value = " ".join("".join(c if ord(c) >= 32 and ord(c) != 127 else " " for c in value).split())
-    value = re.sub(r"\d(?:[ -]?\d){3,}", "••••", value)
+    value = re.sub(r"\d(?:[ -]?\d){3,}", lambda m: "••" + re.sub(r"\D", "", m.group())[-4:], value)
     return value[:80]
 
 
