@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ recipe.name }} – Home HQ{% endblock %}
 {% block content %}
+{% include "_push_failed.html" %}
   <div class="card card--prose card--recipe" id="recipe-root">
     <h1 class="card__title">{{ recipe.name }}</h1>
     <hr class="card__rule">

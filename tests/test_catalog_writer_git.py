@@ -223,3 +223,13 @@ def test_a_rebase_conflict_aborts_and_keeps_the_commit(tmp_path):
 
     assert ["git", "rebase", "--abort"] in calls, "must not leave a rebase in progress"
     assert not any("push" in c for c in calls), "do not push a half-rebased branch"
+
+
+def test_stages_only_the_paths_it_is_given(tmp_path):
+    from catalog_writer import git_commit_and_push
+
+    calls = []
+    git_commit_and_push(str(tmp_path), "Update recipe", github_token="t", paths=("recipes",),
+                        runner=_runner_with_origin(calls, "https://github.com/sh7289/homehq.git"))
+    assert [c[0] for c in calls][0] == ["git", "add", "--", "recipes"]
+

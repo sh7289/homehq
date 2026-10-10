@@ -1,0 +1,6 @@
+{% if request.args.get('push_failed') %}
+<p class="form-error" role="status">
+  Recipe saved on the server, but it is <strong>not yet backed up to GitHub</strong> — the push failed.
+  It will go up with the next successful save. Check <code>journalctl -u homehq</code> for the reason.
+</p>
+{% endif %}
