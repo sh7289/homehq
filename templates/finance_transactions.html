@@ -4,6 +4,7 @@
 {% block actions %}<div class="budget-actions"><a class="btn" href="{{ url_for('finance_imports') }}">Import CSV</a><a class="btn btn--primary" href="{{ url_for('finance_txn_new') }}">Add transaction</a></div>{% endblock %}
 {% block budget_head %}<script src="{{ url_for('static', filename='js/finance-quick.js') }}" defer></script>{% endblock %}
 {% block budget_content %}
+{% if caught_up %}<p class="finance-notice" role="status">All caught up — nothing left to review.</p>{% endif %}
 {% if accepted %}<p class="finance-notice" role="status">Accepted {{ accepted }} suggestion{{ '' if accepted == '1' else 's' }}.</p>{% endif %}
 <details class="budget-filter-fold" open{{ ' data-active' if month or account or category }}><summary>Filters{% if month or account or category %} · active{% endif %}</summary>
 <form class="budget-filters" method="get" action="{{ url_for('finance_transactions') }}">

@@ -6,6 +6,7 @@
   {% if txn.status != 'posted' %}<span class="budget-pill budget-pill--{{ txn.status }}">{{ txn.status|title }}</span>{% endif %}
   {% if txn.review == 'accepted' %}<span class="budget-pill budget-pill--complete">Reviewed</span>{% elif txn.review == 'suggested' %}<span class="budget-pill budget-pill--suggested">Suggested</span>{% endif %}</p>{% endblock %}
 {% block budget_content %}
+{% if reviewed %}<p class="finance-notice" role="status">Saved. Here’s the next one — {{ remaining }} left to review. <a href="{{ url_for('finance_transactions') }}">Back to the list</a></p>{% endif %}
 {% if txn.possible_duplicate_of %}<p class="finance-notice">This may duplicate <a href="{{ url_for('finance_txn', txn_id=txn.possible_duplicate_of) }}">an entry from another source</a> with the same amount within three days. Void one of them, or tick “Keep both” below when you save.</p>{% endif %}
 
 {% if txn.status in ('void', 'replaced') %}

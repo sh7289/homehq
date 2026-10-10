@@ -92,3 +92,30 @@ def test_money_in_without_refund_matches_explains_reimbursement(budget_app):  # 
     back = txn(conn, '35.00', 'VENMO', CHECKING)
     conn.close()
     assert b'paying you back' in app.test_client().get(f'/finance/transactions/{back}').data
+
+
+def classify_form(token, category_id, amount):
+    return {'csrf_token': token, 'kind': 'expense', 'alloc_category': [category_id], 'alloc_person': ['shared'],
+            'alloc_amount': [amount], 'alloc_note': ['']}
+
+
+def test_saving_a_reviewed_transaction_moves_to_the_next_one_needing_review(budget_app):  # noqa: F811
+    app, path = budget_app
+    client = app.test_client()
+    token = csrf(client)
+    conn = finance_store.connect(str(path))
+    newer, older = txn(conn, '-20', 'NEWER', day='2026-10-05'), txn(conn, '-30', 'OLDER', day='2026-10-02')
+    groceries = cat(conn, 'Groceries and household essentials')
+    conn.close()
+
+    r = client.post(f'/finance/transactions/{newer}/classify', data=classify_form(token, groceries, '-20'))
+    assert r.status_code == 302 and r.location.endswith(f'/finance/transactions/{older}?reviewed=1')
+    assert b'1 left to review' in client.get(r.location).data
+
+    r = client.post(f'/finance/transactions/{older}/classify', data=classify_form(token, groceries, '-30'))
+    assert r.status_code == 302 and r.location.endswith('/finance/transactions?caught_up=1')
+    assert b'All caught up' in client.get(r.location).data
+
+    # Editing something already reviewed stays on that transaction.
+    r = client.post(f'/finance/transactions/{newer}/classify', data=classify_form(token, groceries, '-20'))
+    assert r.location.endswith(f'/finance/transactions/{newer}')
