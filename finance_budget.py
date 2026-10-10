@@ -19,7 +19,8 @@ ROLLOVERS = ('reset', 'capped', 'carry')
 BASES = ('planning', 'estimate', 'historical')
 ROLES = ('checking', 'savings', 'reserve', 'card', 'hsa', 'loan', 'other')
 CENT = Decimal('0.01')
-SEED_VERSION = '4'
+SEED_VERSION = '5'
+EXCLUDED_NAME = 'Exclude from budget'
 SEED_START_MONTH = '2026-10'
 KINDS = ('unclassified', 'expense', 'income', 'refund', 'reimbursement', 'transfer', 'card_payment')
 
@@ -45,7 +46,7 @@ CREATE TABLE IF NOT EXISTS finance_budget_categories (
   rollover TEXT NOT NULL DEFAULT 'reset' CHECK (rollover IN ('reset','capped','carry')),
   rollover_cap TEXT, position INTEGER NOT NULL DEFAULT 0,
   policy_includes TEXT NOT NULL DEFAULT '', policy_excludes TEXT NOT NULL DEFAULT '',
-  notes TEXT NOT NULL DEFAULT '');
+  notes TEXT NOT NULL DEFAULT '', excluded INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS finance_budget_targets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   category_id INTEGER NOT NULL REFERENCES finance_budget_categories(id),
@@ -229,6 +230,8 @@ def initialize(conn):
         for statement in SCHEMA.split(';'):
             if statement.strip():
                 conn.execute(statement)
+        if 'excluded' not in {r[1] for r in conn.execute('PRAGMA table_info(finance_budget_categories)')}:
+            conn.execute('ALTER TABLE finance_budget_categories ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0')
         for key, value in (('primary_currency', 'USD'), ('budget_start', '2026-11-01'),
                            ('people', json.dumps(['Heather', 'Steve']))):
             conn.execute('INSERT OR IGNORE INTO finance_budget_settings VALUES (?,?)', (key, value))
@@ -241,6 +244,8 @@ def initialize(conn):
                 _seed_v3(conn)
             if version < '4':
                 _seed_v4(conn)
+            if version < '5':
+                _seed_v5(conn)
             conn.execute("INSERT INTO finance_budget_settings VALUES ('seed_version', ?) "
                          'ON CONFLICT(key) DO UPDATE SET value=excluded.value', (SEED_VERSION,))
 
@@ -325,6 +330,18 @@ def _seed_v4(conn):
         if row:
             conn.execute("INSERT INTO finance_fund_goals (category_id,target_date,note,updated_by,updated_at) VALUES (?,?,?,'seed',?)",
                          (row['id'], target_date, note, now))
+
+
+def _seed_v5(conn):
+    """Add the one category whose lines are recorded but never counted."""
+    if conn.execute('SELECT 1 FROM finance_budget_categories WHERE excluded=1').fetchone():
+        return
+    position = conn.execute('SELECT COALESCE(MAX(position), 0) + 1 FROM finance_budget_categories').fetchone()[0]
+    conn.execute(
+        "INSERT INTO finance_budget_categories (name,type,position,policy_includes,policy_excludes,excluded) "
+        "VALUES (?,'other',?,?,?,1)",
+        (EXCLUDED_NAME, position, 'Money that belongs to months before budgeting began, or your own money moving around',
+         'Anything that should count against a category or as income'))
 
 
 def _seed(conn):
