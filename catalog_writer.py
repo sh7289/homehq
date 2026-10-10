@@ -180,8 +180,9 @@ def _origin_url(repo_dir, runner):
     return getattr(result, "stdout", "") or ""
 
 
-def git_commit_and_push(repo_dir, message, github_token, branch="main", runner=subprocess.run):
-    """Stage the catalog, commit, and push using a write-scoped token.
+def git_commit_and_push(repo_dir, message, github_token, branch="main", runner=subprocess.run,
+                        paths=("content", "photos")):
+    """Stage ``paths`` (the catalog by default), commit, and push using a write-scoped token.
 
     The token is passed via GIT_ASKPASS (a short-lived helper script) rather
     than embedded in argv or the remote URL, so it doesn't leak through the
@@ -192,7 +193,7 @@ def git_commit_and_push(repo_dir, message, github_token, branch="main", runner=s
     # Stage only the catalog, never the whole repo: this runs in the app
     # directory, so `git add -A` would sweep up anything untracked sitting
     # there and publish it to GitHub.
-    runner(["git", "add", "--", "content", "photos"], cwd=repo_dir, check=True)
+    runner(["git", "add", "--", *paths], cwd=repo_dir, check=True)
     try:
         runner(
             ["git", "commit", "-m", message],

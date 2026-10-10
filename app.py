@@ -1,5 +1,6 @@
 import os
 import re
+import subprocess
 import uuid
 from datetime import date, timedelta
 
@@ -159,6 +160,24 @@ def create_app():
     )
     app.recipes = RecipeStore(recipes_dir)
     app.recipes.reload()
+
+    def publish_recipes(message):
+        """Commit and push the recipes folder, as catalog edits are.
+
+        Recipes live in the app's own checkout, so an uncommitted edit there
+        blocks the next deploy's `git pull`. Returns False only when a push was
+        attempted and failed; the recipe is saved on the server either way.
+        """
+        token = os.environ.get("HOMEHQ_GITHUB_TOKEN")
+        folder = os.path.relpath(os.path.realpath(recipes_dir), os.path.realpath(repo_dir))
+        if not token or folder.startswith(os.pardir):
+            return True
+        try:
+            catalog_writer.git_commit_and_push(repo_dir, message, token, paths=(folder,))
+        except (catalog_writer.PushFailed, subprocess.CalledProcessError, OSError) as exc:
+            app.logger.warning("Recipe push failed: %s", exc)
+            return False
+        return True
 
     def get_db():
         if "db_conn" not in g:
@@ -1218,7 +1237,8 @@ def create_app():
                 body=request.form.get("body", ""),
             )
             app.recipes.reload()
-            return redirect(url_for("recipes"))
+            pushed = publish_recipes(f"Add recipe: {name}")
+            return redirect(url_for("recipes", push_failed=None if pushed else 1))
 
         return render_template(
             "recipe_form.html",
@@ -1273,7 +1293,8 @@ def create_app():
                 body=request.form.get("body", "").strip(),
             )
             app.recipes.reload()
-            return redirect(url_for("recipe_detail", slug=slug))
+            pushed = publish_recipes(f"Update recipe: {app.recipes.get(slug).name}")
+            return redirect(url_for("recipe_detail", slug=slug, push_failed=None if pushed else 1))
 
         return render_template("recipe_edit.html", recipe=recipe, active="recipes")
 
@@ -1289,7 +1310,8 @@ def create_app():
                 recipes_dir, slug, _select_ingredients(request.form)
             )
             app.recipes.reload()
-            return redirect(url_for("recipe_detail", slug=slug))
+            pushed = publish_recipes(f"Update recipe ingredients: {recipe.name}")
+            return redirect(url_for("recipe_detail", slug=slug, push_failed=None if pushed else 1))
 
         return _render_ingredient_editor(recipe, recipe.ingredients)
 
@@ -1460,7 +1482,8 @@ def create_app():
 
             recipe_writer.set_steps(recipes_dir, slug, steps)
             app.recipes.reload()
-            return redirect(url_for("recipe_detail", slug=slug))
+            pushed = publish_recipes(f"Update recipe steps: {recipe.name}")
+            return redirect(url_for("recipe_detail", slug=slug, push_failed=None if pushed else 1))
 
         return _render_step_editor(recipe, recipe.steps)
 
