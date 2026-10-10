@@ -384,7 +384,7 @@ id kept only as a hash; memos are dropped.
 - **Window.** The first sync asks from the budget start (Oct 1, 2026). Later syncs
   re-ask the last 7 days already covered so late-posting purchases are caught;
   anything already stored is skipped. Requests never reach back more than 60 days.
-- **Coverage.** Each sync records coverage through yesterday for each account,
+- **Coverage.** Each sync records coverage through today for each account,
   unless SimpleFIN reported a warning or returned a malformed row for that account.
 - **Undo.** A sync that finds new rows for an account shows up on **Imports** as
   "Bank sync"; **Undo this import** removes those rows and their coverage. The next

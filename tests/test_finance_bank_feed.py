@@ -41,7 +41,7 @@ def test_new_posted_transactions_become_unreviewed_ledger_rows_with_coverage(tmp
     assert [(t['txn_date'], t['amount'], t['status'], t['review'] in ('unreviewed', 'suggested')) for t in txns] == [
         ('2026-10-05', '-42.10', 'posted', True), ('2026-10-06', '-5.00', 'posted', True)]
     assert txns[1]['original_description'] == 'CAFE ••••'
-    assert coverage(conn) == [('2026-10-01', '2026-10-08')]
+    assert coverage(conn) == [('2026-10-01', '2026-10-09')]
     batch = conn.execute('SELECT * FROM finance_import_batches').fetchone()
     assert (batch['label'], batch['state'], batch['imported_by'], batch['new_count']) == ('Bank sync', 'committed', 'bank-sync', 2)
 
@@ -54,7 +54,7 @@ def test_overlapping_sync_skips_rows_already_stored_and_adds_no_empty_batch(tmp_
     assert result == {CARD_S: {'new': 0, 'duplicate': 1, 'covered': True}}
     assert len(sync_txns(conn)) == 1
     assert conn.execute('SELECT COUNT(*) FROM finance_import_batches').fetchone()[0] == 1
-    assert coverage(conn)[-1] == ('2026-10-01', '2026-10-09')
+    assert coverage(conn)[-1] == ('2026-10-02', '2026-10-10')
 
 
 def test_identical_purchases_with_distinct_bank_ids_are_both_kept(tmp_path):
@@ -96,7 +96,7 @@ def test_start_date_overlaps_last_sync_and_never_reaches_past_budget_start_or_si
     assert F.start_date(conn, TODAY) == '2026-10-01'
     F.record(conn, {a: {'complete': True, 'transactions': []} for a in (CHECKING, CARD_S, CARD_H)},
              complete=True, today=date(2026, 10, 20))
-    assert F.start_date(conn, date(2026, 10, 21)) == '2026-10-12'
+    assert F.start_date(conn, date(2026, 10, 21)) == '2026-10-13'
     finance_budget.set_account(conn, CHECKING, included=False, role='checking')
     finance_budget.set_account(conn, CARD_S, included=False, role='card')
     finance_budget.set_account(conn, CARD_H, included=False, role='card')
@@ -137,3 +137,12 @@ def test_upgrade_allows_sync_source_and_keeps_existing_records(tmp_path):
     assert conn.execute('PRAGMA foreign_key_check').fetchall() == []
     F.record(conn, feed([row('1')]), complete=True, today=TODAY)
     assert len(sync_txns(conn)) == 1
+
+
+def test_synced_month_is_not_flagged_as_missing_data(tmp_path):
+    import finance_ledger_math
+    conn = ledger_db(tmp_path)
+    F.record(conn, {a: {'complete': True, 'transactions': []} for a in (CHECKING, CARD_S, CARD_H)},
+             complete=True, today=TODAY)
+    summary = finance_ledger_math.month_summary(conn, '2026-10', TODAY)
+    assert [c['missing'] for c in summary['coverage']] == [[], [], []]

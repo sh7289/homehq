@@ -54,7 +54,8 @@ def start_date(conn, today):
 def record(conn, feed, *, complete, today):
     """Store new posted rows for each included account; returns per-account counts."""
     budget_start = _budget_start(conn).isoformat()
-    end = today - timedelta(days=1)
+    # Through today, as the month view requires; the next sync's overlap catches rows posted later.
+    end = today
     results = {}
     for account_id in _included(conn):
         entry = feed.get(account_id)
