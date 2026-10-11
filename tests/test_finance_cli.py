@@ -187,6 +187,7 @@ def test_live_sync_stores_posted_transactions_for_budget_accounts(tmp_path):
     code = sync_finance.main([], environ=_live_db(tmp_path), fetch_feed=fetch_feed, today=date(2026, 10, 9),
                              stdout=type("W", (), {"write": lambda self, t: out.append(t)})())
     assert code == 0 and asked == ["2026-10-01"]
+    assert "Bank sync: Steve card: 1 new, 0 already stored, covered." in "".join(out)
     conn = finance_store.connect(str(tmp_path / "private" / "finance.db"))
     assert conn.execute("SELECT amount FROM finance_txns").fetchone()["amount"] == "-42.10"
     assert conn.execute("SELECT balance FROM finance_accounts WHERE id=?", (CARD_S,)).fetchone()["balance"] == "5"

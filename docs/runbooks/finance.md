@@ -384,8 +384,13 @@ id kept only as a hash; memos are dropped.
 - **Window.** The first sync asks from the budget start (Oct 1, 2026). Later syncs
   re-ask the last 7 days already covered so late-posting purchases are caught;
   anything already stored is skipped. Requests never reach back more than 60 days.
-- **Coverage.** Each sync records coverage through today for each account,
-  unless SimpleFIN reported a warning or returned a malformed row for that account.
+- **Coverage.** Each sync records coverage through today for each account, except an
+  account whose bank connection SimpleFIN reports as needing attention, or one with a
+  transaction row that can't be read. An error SimpleFIN doesn't tie to a connection
+  withholds coverage from every account. The sync journal has one line per account:
+  `Bank sync: <account>: N new, M already stored, covered` or `not covered: <reason>`.
+  "connection needs attention in SimpleFIN" means re-authorizing that bank at
+  bridge.simplefin.org.
 - **Undo.** A sync that finds new rows for an account shows up on **Imports** as
   "Bank sync"; **Undo this import** removes those rows and their coverage. The next
   sync will bring them back if they are still in its window.

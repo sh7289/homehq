@@ -36,7 +36,7 @@ def test_new_posted_transactions_become_unreviewed_ledger_rows_with_coverage(tmp
     conn = ledger_db(tmp_path)
     result = F.record(conn, feed([row('1'), row('2', '2026-10-06', '-5.00', 'CAFE 5551234567')]), complete=True, today=TODAY)
 
-    assert result == {CARD_S: {'new': 2, 'duplicate': 0, 'covered': True}}
+    assert result == {CARD_S: {'new': 2, 'duplicate': 0, 'covered': True, 'problem': None}}
     txns = sync_txns(conn)
     assert [(t['txn_date'], t['amount'], t['status'], t['review'] in ('unreviewed', 'suggested')) for t in txns] == [
         ('2026-10-05', '-42.10', 'posted', True), ('2026-10-06', '-5.00', 'posted', True)]
@@ -51,7 +51,7 @@ def test_overlapping_sync_skips_rows_already_stored_and_adds_no_empty_batch(tmp_
     F.record(conn, feed([row('1')]), complete=True, today=TODAY)
     result = F.record(conn, feed([row('1')]), complete=True, today=date(2026, 10, 10))
 
-    assert result == {CARD_S: {'new': 0, 'duplicate': 1, 'covered': True}}
+    assert result == {CARD_S: {'new': 0, 'duplicate': 1, 'covered': True, 'problem': None}}
     assert len(sync_txns(conn)) == 1
     assert conn.execute('SELECT COUNT(*) FROM finance_import_batches').fetchone()[0] == 1
     assert coverage(conn)[-1] == ('2026-10-02', '2026-10-10')
@@ -156,3 +156,20 @@ def test_month_stays_covered_after_midnight_until_the_next_sync(tmp_path):
     later = date(2026, 10, 10)  # the UTC date has rolled over; the 6am sync hasn't run yet
     summary = finance_ledger_math.month_summary(conn, '2026-10', later)
     assert [c['missing'] for c in summary['coverage']] == [[], [], []]
+
+
+def test_a_broken_connection_withholds_coverage_only_from_its_accounts(tmp_path):
+    conn = ledger_db(tmp_path)
+    data = feed([row('1')])
+    data[CARD_H] = {'complete': False, 'problem': 'connection needs attention in SimpleFIN', 'transactions': [row('2')]}
+    result = F.record(conn, data, today=TODAY)
+    assert result[CARD_S]['covered'] is True
+    assert result[CARD_H] == {'new': 1, 'duplicate': 0, 'covered': False, 'problem': 'connection needs attention in SimpleFIN'}
+    assert coverage(conn, CARD_H) == []
+
+
+def test_coverage_gaps_are_one_line_however_many_accounts(tmp_path):
+    import finance_ledger_math
+    conn = ledger_db(tmp_path)
+    reasons = finance_ledger_math.month_summary(conn, '2026-10', TODAY)['quality_reasons']
+    assert reasons == ['3 accounts have days this month with no transactions recorded.']

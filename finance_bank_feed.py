@@ -51,8 +51,14 @@ def start_date(conn, today):
     return min(starts).isoformat() if starts else None
 
 
-def record(conn, feed, *, complete, today):
-    """Store new posted rows for each included account; returns per-account counts."""
+def record(conn, feed, *, today, complete=True):
+    """Store new posted rows for each included account; returns per-account counts.
+
+    Each feed entry says whether its account's list is complete (SimpleFIN errors
+    are scoped to the connection or account they name), so one broken bank login
+    no longer stops coverage for every other account. ``complete=False`` withholds
+    coverage from all of them.
+    """
     budget_start = _budget_start(conn).isoformat()
     # Through today, as the month view requires; the next sync's overlap catches rows posted later.
     end = today
@@ -92,5 +98,6 @@ def record(conn, feed, *, complete, today):
             if covered:
                 finance_budget.declare_coverage(conn, account_id=account_id, start=start.isoformat(), end=end.isoformat(),
                                                 actor=ACTOR, today=today, source='import', batch_id=batch_id)
-        results[account_id] = dict(new=len(rows), duplicate=duplicate, covered=covered)
+        results[account_id] = dict(new=len(rows), duplicate=duplicate, covered=covered,
+                                   problem=entry.get('problem') if not covered else None)
     return results

@@ -46,7 +46,7 @@
   {% else %}<p>{% if s.quality == 'insufficient' %}Spending totals below are known to be missing activity. Don’t read the remaining amounts as final.{% else %}Totals may still change as items are reviewed or post.{% endif %}</p>
   <ul>{% for reason in s.quality_reasons %}<li>{{ reason }}</li>{% endfor %}</ul>{% endif %}
   {% set gaps = s.coverage|selectattr('missing')|list %}
-  {% if gaps %}<details><summary>Coverage gaps by account</summary><ul class="budget-gaps">{% for item in gaps %}<li><strong>{{ item.name }}</strong>: {% for start, end in item.missing %}{{ start }}{% if end != start %} to {{ end }}{% endif %}{{ ', ' if not loop.last }}{% endfor %}</li>{% endfor %}</ul>
+  {% if gaps %}<details><summary>Which accounts and dates</summary><ul class="budget-gaps">{% for item in gaps %}<li><strong>{{ item.name }}</strong>: {% for start, end in item.missing %}{{ start }}{% if end != start %} to {{ end }}{% endif %}{{ ', ' if not loop.last }}{% endfor %}</li>{% endfor %}</ul>
     <p class="finance-help"><a href="{{ url_for('finance_imports') }}">Import transactions</a> or <a href="{{ url_for('finance_budget_settings') }}#coverage">record coverage</a> for these dates.</p></details>{% endif %}
 </section>
 

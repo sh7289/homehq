@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import finance_bank_feed
+import finance_ledger
 import finance_store
 import simplefin
 
@@ -109,10 +110,15 @@ def main(argv=None, *, environ=None, fetch=None, fetch_feed=None, today=None, st
         if feed is not None:
             # Balances are already saved; a transaction problem must not undo them.
             try:
-                finance_bank_feed.record(connection, feed, complete=payload["complete"], today=today)
+                results = finance_bank_feed.record(connection, feed, today=today)
             except (finance_store.FinanceStoreError, sqlite3.Error):
                 _message("Finance balances synced; transactions could not be recorded.", stderr)
                 return 1
+            names = finance_ledger._display(connection)
+            for account_id, result in sorted(results.items(), key=lambda item: names.get(item[0], "")):
+                status = "covered" if result["covered"] else "not covered: " + (result["problem"] or "nothing to cover yet")
+                _message("Bank sync: {}: {} new, {} already stored, {}.".format(
+                    names.get(account_id, "account"), result["new"], result["duplicate"], status), stdout)
     except (finance_store.FinanceStoreError, OSError, sqlite3.Error):
         _message("Finance sync configuration is invalid.", stderr)
         return 2

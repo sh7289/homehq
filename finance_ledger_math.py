@@ -75,10 +75,11 @@ def _summary(conn, month, today):
     if not included:
         insufficient = True
         reasons.append('No accounts are included in budgeting.')
-    for item in coverage:
-        if item['missing']:
-            insufficient = True
-            reasons.append(f"{item['name']} has no transactions recorded for part of this month.")
+    gaps = sum(1 for item in coverage if item['missing'])
+    if gaps:
+        # One line, not one per account: the page lists which accounts and dates.
+        insufficient = True
+        reasons.append(f"{gaps} account{' has' if gaps == 1 else 's have'} days this month with no transactions recorded.")
 
     txns = conn.execute("SELECT * FROM finance_txns WHERE txn_date BETWEEN ? AND ? AND status IN ('posted','pending')",
                         (start.isoformat(), end.isoformat())).fetchall()
