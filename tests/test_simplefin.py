@@ -457,7 +457,7 @@ def test_fetch_accounts_requests_posted_transactions_from_start_date():
     assert result["accounts"][0]["balance"] == Decimal("100.10")
     assert set(result) == {"accounts", "warnings", "complete"}
     account_id = result["accounts"][0]["id"]
-    assert feed == {account_id: {"complete": True, "transactions": [{
+    assert feed == {account_id: {"complete": True, "problem": None, "transactions": [{
         "id_hash": simplefin.transaction_hash(account_id, "t-1"),
         "txn_date": "2026-10-05",
         "posted_date": "2026-10-05",
@@ -504,11 +504,48 @@ def test_malformed_transaction_marks_account_incomplete_but_keeps_balances(bad):
     assert [t["amount"] for t in entry["transactions"]] == [Decimal("-42.10")]
 
 
-def test_account_without_transaction_list_is_incomplete():
+def test_account_without_transaction_list_has_no_transactions():
     item = account()
     del item["transactions"]
     result, feed = simplefin.fetch_accounts(
         "https://u:p@bridge.simplefin.org/simplefin", "2026-10-01",
         session=FakeSession(FakeResponse(payload=payload([item]))),
     )
-    assert feed[result["accounts"][0]["id"]] == {"complete": False, "transactions": []}
+    assert feed[result["accounts"][0]["id"]] == {"complete": True, "problem": None, "transactions": []}
+
+
+def test_malformed_row_names_the_problem_without_its_content():
+    rows = [txn("good"), txn("bad", amount="1.234")]
+    result, feed = simplefin.fetch_accounts(
+        "https://u:p@bridge.simplefin.org/simplefin", "2026-10-01",
+        session=FakeSession(FakeResponse(payload=payload([account(transactions=rows)]))),
+    )
+    assert feed[result["accounts"][0]["id"]]["problem"] == "1 unreadable transaction (amount)"
+
+
+def _two_connections(errlist):
+    data = payload([account("acct-1", "conn-1", transactions=[txn("a")]),
+                    account("acct-2", "conn-2", transactions=[txn("b")])], errlist=errlist)
+    data["connections"].append(dict(data["connections"][0], conn_id="conn-2", name="Other bank"))
+    result, feed = simplefin.fetch_accounts(
+        "https://u:p@bridge.simplefin.org/simplefin", "2026-10-01",
+        session=FakeSession(FakeResponse(payload=data)),
+    )
+    return [feed[a["id"]] for a in result["accounts"]]
+
+
+def test_a_connection_error_only_affects_that_connections_accounts():
+    first, second = _two_connections([{"code": "con.auth", "msg": "x", "conn_id": "conn-2"}])
+    assert (first["complete"], first["problem"]) == (True, None)
+    assert (second["complete"], second["problem"]) == (False, "connection needs attention in SimpleFIN")
+    assert len(second["transactions"]) == 1
+
+
+def test_an_account_error_only_affects_that_account():
+    first, second = _two_connections([{"code": "act.missingdata", "msg": "x", "account_id": "acct-1"}])
+    assert (first["complete"], second["complete"]) == (False, True)
+
+
+def test_an_error_without_a_connection_affects_every_account():
+    first, second = _two_connections([{"code": "gen.auth", "msg": "x"}])
+    assert first["complete"] is False and second["complete"] is False

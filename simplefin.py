@@ -381,59 +381,91 @@ def _mask_description(value):
     return re.sub(r"\d(?:[ -]?\d){3,}", "••••", value)[:200]
 
 
-def _txn_day(value):
+def _txn_day(value, field="date"):
     if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= 32503680000:
-        raise ValueError
+        raise ValueError(field)
     return datetime.fromtimestamp(value, timezone.utc).date().isoformat()
 
 
 def _transaction(account_id, item):
-    """One posted transaction as masked, hashed fields, or None when still pending."""
+    """One posted transaction as masked, hashed fields, or None when still pending.
+
+    A row that can't be read raises ValueError naming only the field at fault,
+    so the reason can be logged without any of the row's content.
+    """
     if not isinstance(item, dict):
-        raise ValueError
+        raise ValueError("row")
     if item.get("pending") is True or item.get("posted") == 0:
         return None
     provider_id = item.get("id")
     if not isinstance(provider_id, str) or not provider_id or len(provider_id) > 200:
-        raise ValueError
+        raise ValueError("id")
     posted = _txn_day(item.get("posted"))
     transacted = item.get("transacted_at")
     amount = item.get("amount")
     if not isinstance(amount, str) or len(amount) > 40:
-        raise ValueError
+        raise ValueError("amount")
     try:
         number = Decimal(amount)
     except InvalidOperation:
-        raise ValueError from None
+        raise ValueError("amount") from None
     if not number.is_finite() or number.copy_abs() >= Decimal("1e12") or number != number.quantize(Decimal("0.01")):
-        raise ValueError
+        raise ValueError("amount")
     texts = [item.get(key) for key in ("description", "payee")]
     if not any(isinstance(text, str) and text.strip() for text in texts):
-        raise ValueError
+        raise ValueError("description")
     description = next(_mask_description(text) for text in texts if isinstance(text, str) and text.strip())
     return {
         "id_hash": transaction_hash(account_id, provider_id),
-        "txn_date": _txn_day(transacted) if transacted else posted,
+        "txn_date": _txn_day(transacted, "transacted date") if transacted else posted,
         "posted_date": posted,
         "amount": number.quantize(Decimal("0.01")),
         "description": description,
     }
 
 
+def _error_scopes(data):
+    """Which connections and accounts SimpleFIN reported errors for; True if any error names neither."""
+    connections, accounts, everything = set(), set(), False
+    for item in data.get("errlist", []) + data.get("errors", []):
+        conn_id = item.get("conn_id") if isinstance(item, dict) else None
+        account_id = item.get("account_id") if isinstance(item, dict) else None
+        if isinstance(conn_id, str) and conn_id:
+            connections.add(conn_id)
+        elif isinstance(account_id, str) and account_id:
+            accounts.add(account_id)
+        else:
+            everything = True
+    return connections, accounts, everything
+
+
 def _transactions(data, accounts):
-    """Posted transactions keyed by hashed account id; one bad row marks its account incomplete."""
+    """Posted transactions keyed by hashed account id, each with whether the account's list is complete.
+
+    An account is incomplete when SimpleFIN reported an error for it or its
+    connection, or when one of its rows can't be read; ``problem`` says which.
+    A missing transaction list means the account had none.
+    """
+    connections, failed_accounts, everything = _error_scopes(data)
     feed = {}
     for item, normalized in zip(data["accounts"], accounts):
-        rows, complete = [], isinstance(item.get("transactions"), list)
-        for raw in item.get("transactions") if complete else []:
+        rows, unreadable = [], []
+        listed = item.get("transactions", [])
+        for raw in listed if isinstance(listed, list) else [None]:
             try:
                 row = _transaction(normalized["id"], raw)
-            except ValueError:
-                complete = False
+            except ValueError as error:
+                unreadable.append(str(error))
                 continue
             if row is not None:
                 rows.append(row)
-        feed[normalized["id"]] = {"complete": complete, "transactions": rows}
+        problem = None
+        if everything or item.get("conn_id") in connections or item.get("id") in failed_accounts:
+            problem = "connection needs attention in SimpleFIN"
+        elif unreadable:
+            problem = "{} unreadable transaction{} ({})".format(
+                len(unreadable), "" if len(unreadable) == 1 else "s", ", ".join(sorted(set(unreadable))))
+        feed[normalized["id"]] = {"complete": problem is None, "problem": problem, "transactions": rows}
     return feed
 
 
